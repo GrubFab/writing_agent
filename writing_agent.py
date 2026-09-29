@@ -318,10 +318,17 @@ date_updated: {datetime.now().date().isoformat()}
     return path
 
 
+def chapter_exists(vault_path: Path, chapter_num: int) -> bool:
+    v_path = Path(vault_path).expanduser().resolve()
+    ch_file = v_path / "Chapters" / f"Chapter_{int(chapter_num):02d}.md"
+    return ch_file.exists()
+
+
 def update_character(vault_path: Path, name, is_new, update_text, chapter_num):
     path = vault_path / "Characters" / f"{slugify(name)}.md"
     date = datetime.now().date().isoformat()
-    entry = f"\n### Chapter {chapter_num} ({date})\n{update_text}\n"
+    clean_update = update_text.strip()
+    entry = f"### Chapter {chapter_num} ({date})\n{clean_update}\n"
 
     if not path.exists():
         content = f"""---
@@ -335,29 +342,75 @@ status: alive
 
 {AUTO_MARK_START}
 ## Auto-updates
+
 {entry}{AUTO_MARK_END}
 """
         path.write_text(content, encoding="utf-8")
         return path, True
 
     text = path.read_text(encoding="utf-8")
+    pattern = rf"(### Chapter {chapter_num}\b[^\n]*\n)([\s\S]*?)(?=(?:\n### Chapter |\Z))"
+    replacement = f"### Chapter {chapter_num} ({date})\n{clean_update}\n"
+
     if AUTO_MARK_START in text and AUTO_MARK_END in text:
         before, rest = text.split(AUTO_MARK_START, 1)
-        _, after = rest.split(AUTO_MARK_END, 1)
-        new_text = before + AUTO_MARK_START + "\n## Auto-updates\n" + \
-            rest.split(AUTO_MARK_END, 1)[0].split("## Auto-updates\n", 1)[-1] + entry + AUTO_MARK_END + after
+        auto_content, after = rest.split(AUTO_MARK_END, 1)
+
+        if re.search(pattern, auto_content):
+            new_auto = re.sub(pattern, lambda _: replacement, auto_content, count=1)
+        else:
+            new_auto = auto_content.rstrip() + f"\n\n{replacement}"
+
+        new_text = f"{before}{AUTO_MARK_START}{new_auto.rstrip()}\n{AUTO_MARK_END}{after}"
     else:
-        new_text = text.rstrip() + f"\n\n{AUTO_MARK_START}\n## Auto-updates\n{entry}{AUTO_MARK_END}\n"
+        new_text = text.rstrip() + f"\n\n{AUTO_MARK_START}\n## Auto-updates\n\n{replacement}{AUTO_MARK_END}\n"
 
     path.write_text(new_text, encoding="utf-8")
     return path, False
 
 
-def append_timeline_events(vault_path: Path, events, chapter_num):
+def update_timeline_events(vault_path: Path, events, chapter_num):
     path = vault_path / "Timeline" / "timeline.md"
-    rows = [f"| {e['order_or_date']} | {e['event']} | {', '.join(e.get('characters_involved', []))} | {chapter_num} |" for e in events]
-    with path.open("a", encoding="utf-8") as f:
-        f.write("\n".join(rows) + ("\n" if rows else ""))
+    text = path.read_text(encoding="utf-8") if path.exists() else STARTER_FILES["Timeline/timeline.md"]
+    lines = text.splitlines()
+
+    sep_idx = next((i for i, l in enumerate(lines) if l.strip().startswith("|---")), None)
+    if sep_idx is None:
+        lines = STARTER_FILES["Timeline/timeline.md"].splitlines()
+        sep_idx = next(i for i, l in enumerate(lines) if l.strip().startswith("|---"))
+
+    header_lines = lines[:sep_idx + 1]
+    existing_rows = lines[sep_idx + 1:]
+
+    first_ch_idx = None
+    filtered_rows = []
+    for r in existing_rows:
+        stripped = r.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) >= 4:
+            row_ch = cells[3]
+            if row_ch == str(chapter_num) or row_ch == f"Chapter {chapter_num}":
+                if first_ch_idx is None:
+                    first_ch_idx = len(filtered_rows)
+                continue
+        filtered_rows.append(stripped)
+
+    new_rows = [
+        f"| {e['order_or_date']} | {e['event']} | {', '.join(e.get('characters_involved', []))} | {chapter_num} |"
+        for e in events
+    ]
+
+    if first_ch_idx is not None:
+        final_rows = filtered_rows[:first_ch_idx] + new_rows + filtered_rows[first_ch_idx:]
+    else:
+        final_rows = filtered_rows + new_rows
+
+    path.write_text("\n".join(header_lines + final_rows) + "\n", encoding="utf-8")
+
+
+append_timeline_events = update_timeline_events
 
 
 def update_threads(vault_path: Path, threads, chapter_num):
@@ -420,6 +473,59 @@ def git_commit(vault_path: Path, message: str):
             print(f"Git commit skipped/failed: {out}")
 
 
+def apply_chapter_data(vault_path: Path, chapter_num: int, title: str, status: str, data: dict) -> dict:
+    """Apply approved chapter data to the vault and commit to git."""
+    v_path = Path(vault_path).expanduser().resolve()
+    if not v_path.exists():
+        raise ValueError(f"Vault path does not exist: {v_path}")
+
+    already_exists = chapter_exists(v_path, chapter_num)
+
+    # 1. Write / Overwrite chapter note
+    ch_path = write_chapter_note(
+        v_path,
+        chapter_num,
+        title,
+        data.get("pov_character", "unclear"),
+        status or "draft",
+        data.get("summary", ""),
+        data.get("editorial_suggestions"),
+    )
+
+    # 2. Update characters in-place
+    chars_updated = []
+    for c in data.get("characters", []):
+        c_path, is_new = update_character(v_path, c["name"], c.get("is_new", False), c["update"], chapter_num)
+        chars_updated.append({"name": c["name"], "is_new": is_new, "file": str(c_path)})
+
+    # 3. Update timeline in-place
+    events = data.get("timeline_events", [])
+    if events:
+        update_timeline_events(v_path, events, chapter_num)
+
+    # 4. Update threads in-place
+    threads = data.get("threads", [])
+    if threads:
+        update_threads(v_path, threads, chapter_num)
+
+    # 5. Append log
+    append_log(v_path, chapter_num, title, data)
+
+    # 6. Commit to Git
+    commit_msg = f"Chapter {chapter_num}: {title}" + (" (updated)" if already_exists else "")
+    git_commit(v_path, commit_msg)
+
+    return {
+        "status": "ok",
+        "already_exists": already_exists,
+        "chapter_note": str(ch_path),
+        "characters_updated": chars_updated,
+        "timeline_events_count": len(events),
+        "threads_count": len(threads),
+        "git_committed": (v_path / ".git").exists(),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -444,49 +550,72 @@ def process_chapter(args):
     chapter_text = chapter_path.read_text(encoding="utf-8")
 
     context = gather_context(vault_path)
-    print("Calling local model...")
+    print("Calling local model for analysis & editorial review...")
     try:
         data = call_llm(args.base_url, args.model, context, chapter_text)
     except Exception as e:
         raise SystemExit(f"\nError: {e}")
 
-    status = args.status or "draft"
-    write_chapter_note(
-        vault_path,
-        args.chapter,
-        args.title,
-        data.get("pov_character", "unclear"),
-        status,
-        data["summary"],
-        data.get("editorial_suggestions"),
-    )
+    already_exists = chapter_exists(vault_path, args.chapter)
 
-    for c in data.get("characters", []):
-        update_character(vault_path, c["name"], c.get("is_new", False), c["update"], args.chapter)
+    # Display analysis results & editorial propositions first for review
+    print("\n" + "=" * 62)
+    print(f" CHAPTER {args.chapter}: {args.title} — EDITORIAL REVIEW")
+    if already_exists:
+        print(" (Note: Chapter already exists in vault; updates will apply in-place)")
+    print("=" * 62)
 
-    if data.get("timeline_events"):
-        append_timeline_events(vault_path, data["timeline_events"], args.chapter)
-
-    if data.get("threads"):
-        update_threads(vault_path, data["threads"], args.chapter)
-
-    append_log(vault_path, args.chapter, args.title, data)
-
-    git_commit(vault_path, f"Chapter {args.chapter}: {args.title}")
-
-    print(f"\nDone. Chapter {args.chapter} processed.")
-    print(f"- {len(data.get('characters', []))} character note(s) updated")
-    print(f"- {len(data.get('timeline_events', []))} timeline event(s) added")
-    print(f"- {len(data.get('threads', []))} thread(s) updated")
     ed = data.get("editorial_suggestions")
     if ed and isinstance(ed, dict):
-        d_count = len(ed.get("dialogue_coaching", []))
-        p_count = len(ed.get("prose_propositions", []))
-        print(f"- 💡 Editorial propositions: {d_count} dialogue, {p_count} prose/rhythm")
+        if ed.get("strengths"):
+            print("\n✨ Strengths:")
+            for s in ed["strengths"]:
+                print(f"  - {s}")
+        if ed.get("style_assessment"):
+            print(f"\n🎭 Style & Pacing Assessment:\n  {ed['style_assessment']}")
+        if ed.get("dialogue_coaching"):
+            print("\n🗣️ Dialogue Coaching:")
+            for d in ed["dialogue_coaching"]:
+                print(f"  - {d.get('character', 'Character')}: \"{d.get('original_line', '')}\"")
+                print(f"    Critique: {d.get('critique', '')}")
+                print(f"    Proposition: \"{d.get('proposition', '')}\"")
+        if ed.get("prose_propositions"):
+            print("\n✍️ Prose & Cadence Propositions:")
+            for p in ed["prose_propositions"]:
+                print(f"  - \"{p.get('original_excerpt', '')}\" ({p.get('issue', '')})")
+                print(f"    Proposition: \"{p.get('proposition', '')}\"")
+
+    print("\n" + "-" * 62)
+    print("📋 Extracted Story Data:")
+    print(f"- Summary: {data.get('summary', '')}")
+    print(f"- POV: {data.get('pov_character', 'unclear')}")
+    print(f"- Characters touched: {', '.join(c['name'] for c in data.get('characters', []))}")
+    print(f"- Timeline events: {len(data.get('timeline_events', []))}")
+    print(f"- Threads: {', '.join(t['name'] for t in data.get('threads', []))}")
+
     if data.get("continuity_flags"):
-        print("- ⚠️  Continuity flags — check the log:")
+        print("\n⚠️  Continuity flags:")
         for f in data["continuity_flags"]:
-            print(f"    - {f}")
+            print(f"  - {f}")
+
+    # Prompt user for final decision unless --yes was passed
+    if not getattr(args, "yes", False):
+        try:
+            choice = input("\nApprove and apply these updates to the vault? [y/N]: ").strip().lower()
+            if choice not in ("y", "yes"):
+                print("Aborted. Vault was NOT modified.")
+                return
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted. Vault was NOT modified.")
+            return
+
+    status = args.status or "draft"
+    res = apply_chapter_data(vault_path, args.chapter, args.title, status, data)
+
+    print(f"\n✓ Chapter {args.chapter} successfully applied to vault and committed to Git.")
+    print(f"- {len(res['characters_updated'])} character dossier(s) updated in-place")
+    print(f"- {res['timeline_events_count']} timeline event(s) merged in-place")
+    print(f"- {res['threads_count']} plot thread(s) updated")
 
 
 def main():
@@ -504,6 +633,7 @@ def main():
     p_proc.add_argument("--status", default=None, help="draft|revised|final (default: draft)")
     p_proc.add_argument("--model", required=True, help="Model name as loaded in LM Studio.")
     p_proc.add_argument("--base-url", dest="base_url", default=DEFAULT_BASE_URL, help=f"LM Studio API base URL (default: {DEFAULT_BASE_URL})")
+    p_proc.add_argument("-y", "--yes", action="store_true", help="Automatically approve and apply changes without prompt.")
 
     p_app = sub.add_parser("app", help="Launch the Visual Web Dashboard / Window.")
     p_app.add_argument("--host", default="127.0.0.1", help="Host address (default: 127.0.0.1)")

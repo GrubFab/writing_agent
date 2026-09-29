@@ -3,12 +3,14 @@ let currentVault = "C:\\Users\\FSGee\\Nextcloud\\book\\Cold\\vault\\MyNovelVault
 let currentProject = { id: "cold", name: "Cold", path: currentVault };
 let currentBaseUrl = "http://localhost:1234/v1";
 let isProcessing = false;
+let stagedAnalysis = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
   // 1. Load initial projects & config
   await loadProjects();
   checkLmStudioModels();
   loadVaultData();
+  checkChapterExists();
 
   setupEventListeners();
 });
@@ -69,6 +71,7 @@ async function switchProject(projectId) {
       renderProjectsDropdown(data.projects, data.active_project.id);
       closeProjectDropdown();
       loadVaultData();
+      checkChapterExists();
     }
   } catch (err) {
     alert("Failed to switch project: " + err.message);
@@ -261,6 +264,35 @@ async function loadVaultData() {
 }
 
 // ---------------------------------------------------------------------------
+// Chapter Existence Check
+// ---------------------------------------------------------------------------
+
+async function checkChapterExists() {
+  const chInput = document.getElementById("input-chapter-num");
+  if (!chInput) return;
+  const chNum = parseInt(chInput.value) || 1;
+  const indicator = document.getElementById("chapter-exists-indicator");
+  if (!indicator) return;
+
+  try {
+    const res = await fetch(`/api/chapter/check?vault_path=${encodeURIComponent(currentVault)}&chapter_num=${chNum}`);
+    if (res.ok) {
+      const data = await res.json();
+      indicator.style.display = "block";
+      if (data.exists) {
+        indicator.className = "chapter-status-indicator exists";
+        indicator.textContent = `⚠️ Chapter ${chNum} already in vault (will update in-place)`;
+      } else {
+        indicator.className = "chapter-status-indicator new";
+        indicator.textContent = `✨ New Chapter ${chNum}`;
+      }
+    }
+  } catch (e) {
+    indicator.style.display = "none";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event Listeners
 // ---------------------------------------------------------------------------
 
@@ -387,12 +419,30 @@ function setupEventListeners() {
     wordCountBadge.textContent = `${words.toLocaleString()} words | ${chars.toLocaleString()} characters`;
   });
 
+  // Chapter number change listener
+  const chInput = document.getElementById("input-chapter-num");
+  if (chInput) {
+    chInput.addEventListener("input", checkChapterExists);
+    chInput.addEventListener("change", checkChapterExists);
+  }
+
+  // Staged Review Action buttons
+  const btnApply = document.getElementById("btn-apply-to-vault");
+  if (btnApply) {
+    btnApply.addEventListener("click", handleApplyToVault);
+  }
+
+  const btnDiscard = document.getElementById("btn-discard-staged");
+  if (btnDiscard) {
+    btnDiscard.addEventListener("click", handleDiscardStaged);
+  }
+
   // Process Chapter Button
   document.getElementById("btn-process").addEventListener("click", handleProcessChapter);
 }
 
 // ---------------------------------------------------------------------------
-// Chapter Processing Stream
+// Chapter Processing Stream (Analysis & Staging)
 // ---------------------------------------------------------------------------
 
 async function handleProcessChapter() {
@@ -434,7 +484,7 @@ async function handleProcessChapter() {
   const btnProcess = document.getElementById("btn-process");
   const btnProcessText = document.getElementById("btn-process-text");
   btnProcess.disabled = true;
-  btnProcessText.textContent = "Processing Chapter Draft...";
+  btnProcessText.textContent = "Analyzing Chapter Draft...";
 
   const pipelineSection = document.getElementById("pipeline-section");
   const progressFill = document.getElementById("progress-fill");
@@ -444,7 +494,7 @@ async function handleProcessChapter() {
   pipelineSection.style.display = "flex";
   resultsSection.style.display = "none";
   progressFill.style.width = "5%";
-  consoleStream.textContent = "Starting story agent pipeline...\n";
+  consoleStream.textContent = "Starting story agent analysis pipeline...\n";
 
   // Reset steps
   resetSteps();
@@ -501,17 +551,16 @@ async function handleProcessChapter() {
   } catch (err) {
     consoleStream.textContent += `\n❌ Error: ${err.message}\n`;
     setStepState("step-validate", "error");
-    alert("Processing failed: " + err.message);
+    alert("Analysis failed: " + err.message);
   } finally {
     isProcessing = false;
     btnProcess.disabled = false;
-    btnProcessText.textContent = "Process Chapter Draft";
-    loadVaultData();
+    btnProcessText.textContent = "Analyze Chapter Draft";
   }
 }
 
 function resetSteps() {
-  ["step-validate", "step-context", "step-llm", "step-save"].forEach(id => {
+  ["step-validate", "step-context", "step-llm", "step-review"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.className = "step-card";
   });
@@ -560,12 +609,43 @@ function handlePipelineEvent(event) {
       break;
     case "llm_done":
       setStepState("step-llm", "done");
-      setStepState("step-save", "active");
+      setStepState("step-review", "active");
       break;
-    case "complete":
-      setStepState("step-save", "done");
+    case "ready_for_review":
+      setStepState("step-review", "done");
+      stagedAnalysis = event.staged_data;
+
+      // Configure Staged Action Bar
+      const bar = document.getElementById("staged-action-bar");
+      if (bar) bar.classList.remove("applied");
+
+      const stagedIcon = document.getElementById("staged-icon");
+      if (stagedIcon) stagedIcon.textContent = "📋";
+
+      const stagedTitle = document.getElementById("staged-title");
+      if (stagedTitle) stagedTitle.textContent = `Staged Analysis — Chapter ${event.staged_data.chapter_num} Ready for Review`;
+
+      const stagedDesc = document.getElementById("staged-desc");
+      if (stagedDesc) stagedDesc.innerHTML = "Review remarks & propositions below. Vault files have <strong>not</strong> been touched yet.";
+
+      const existsBadge = document.getElementById("staged-exists-badge");
+      if (existsBadge) {
+        if (event.already_exists) {
+          existsBadge.style.display = "inline-block";
+          const badgeCh = document.getElementById("badge-ch-num");
+          if (badgeCh) badgeCh.textContent = event.staged_data.chapter_num;
+        } else {
+          existsBadge.style.display = "none";
+        }
+      }
+
+      const btnApply = document.getElementById("btn-apply-to-vault");
+      const btnText = document.getElementById("btn-apply-text");
+      if (btnApply) btnApply.disabled = false;
+      if (btnText) btnText.textContent = "Approve & Apply to Vault";
+
       if (event.result) {
-        renderResults(event.result);
+        renderResults(event.result, false);
       }
       break;
     case "error":
@@ -574,14 +654,92 @@ function handlePipelineEvent(event) {
   }
 }
 
-function renderResults(result) {
+// ---------------------------------------------------------------------------
+// Apply Staged Analysis to Vault (Author Final Decision)
+// ---------------------------------------------------------------------------
+
+async function handleApplyToVault() {
+  if (!stagedAnalysis) {
+    alert("No staged chapter analysis available to apply.");
+    return;
+  }
+
+  const btnApply = document.getElementById("btn-apply-to-vault");
+  const btnText = document.getElementById("btn-apply-text");
+  if (btnApply) btnApply.disabled = true;
+  if (btnText) btnText.textContent = "Applying & Committing...";
+
+  try {
+    const res = await fetch("/api/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(stagedAnalysis),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to apply to vault");
+    }
+
+    const data = await res.json();
+
+    // Visual updates on success
+    const bar = document.getElementById("staged-action-bar");
+    if (bar) bar.classList.add("applied");
+
+    const stagedIcon = document.getElementById("staged-icon");
+    if (stagedIcon) stagedIcon.textContent = "🎉";
+
+    const stagedTitle = document.getElementById("staged-title");
+    if (stagedTitle) stagedTitle.textContent = `✓ Chapter ${stagedAnalysis.chapter_num} Approved & Applied to Vault`;
+
+    const stagedDesc = document.getElementById("staged-desc");
+    if (stagedDesc) stagedDesc.textContent = "Chapter note written, character dossiers & timeline updated in-place, and auto-committed to Git.";
+
+    if (btnText) btnText.textContent = "✓ Applied to Vault";
+
+    const gitBadge = document.getElementById("res-git-badge");
+    if (gitBadge) gitBadge.style.display = "inline-flex";
+
+    // Refresh vault data and chapter status indicator
+    await loadVaultData();
+    checkChapterExists();
+
+    const consoleStream = document.getElementById("console-stream");
+    if (consoleStream) {
+      const time = new Date().toLocaleTimeString();
+      consoleStream.textContent += `[${time}] ✓ Chapter ${stagedAnalysis.chapter_num} successfully applied to vault and committed to Git!\n`;
+      consoleStream.scrollTop = consoleStream.scrollHeight;
+    }
+  } catch (err) {
+    alert("Failed to apply to vault: " + err.message);
+    if (btnApply) btnApply.disabled = false;
+    if (btnText) btnText.textContent = "Approve & Apply to Vault";
+  }
+}
+
+function handleDiscardStaged() {
+  if (!stagedAnalysis) return;
+  if (confirm(`Discard analysis for Chapter ${stagedAnalysis.chapter_num} without modifying the vault?`)) {
+    stagedAnalysis = null;
+    document.getElementById("results-section").style.display = "none";
+    const consoleStream = document.getElementById("console-stream");
+    if (consoleStream) {
+      const time = new Date().toLocaleTimeString();
+      consoleStream.textContent += `[${time}] [Author action] Staged analysis discarded. Vault was NOT modified.\n`;
+    }
+    resetSteps();
+  }
+}
+
+function renderResults(result, isCommitted = false) {
   const resultsSection = document.getElementById("results-section");
   resultsSection.style.display = "block";
 
   // Summary & POV
   document.getElementById("res-summary-text").textContent = result.summary || "";
   document.getElementById("res-pov").textContent = result.pov || "Unclear";
-  document.getElementById("res-git-badge").style.display = "inline-flex";
+  document.getElementById("res-git-badge").style.display = isCommitted ? "inline-flex" : "none";
 
   // Continuity flags
   const contAlert = document.getElementById("continuity-alert");
@@ -858,6 +1016,7 @@ async function submitNewProject() {
     updateVaultDisplay();
     renderProjectsDropdown(data.projects, data.project.id);
     loadVaultData();
+    checkChapterExists();
     alert(`🎉 Novel project "${name}" created!\n\nVault initialized at:\n${currentVault}`);
   } catch (err) {
     alert("Could not create project: " + err.message);

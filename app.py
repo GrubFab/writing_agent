@@ -69,6 +69,14 @@ class ProcessRequest(BaseModel):
     draft_file: Optional[str] = None
 
 
+class ApplyRequest(BaseModel):
+    vault_path: str
+    chapter_num: int
+    title: str
+    status: str = "draft"
+    data: dict
+
+
 class ProjectSwitchRequest(BaseModel):
     project_id: str
 
@@ -430,14 +438,46 @@ def initialize_vault(req: VaultInitRequest):
     return {"status": "ok", "message": f"Vault scaffolded successfully at {v_path}"}
 
 
+@app.get("/api/chapter/check")
+def check_chapter_status(vault_path: str = DEFAULT_VAULT, chapter_num: int = 1):
+    """Check if a chapter already exists in the vault."""
+    v_path = Path(vault_path).expanduser().resolve()
+    exists = wa.chapter_exists(v_path, chapter_num)
+    return {"exists": exists, "chapter_num": chapter_num}
+
+
+@app.post("/api/apply")
+def apply_chapter_to_vault(req: ApplyRequest):
+    """Applies reviewed and approved chapter data to the vault and commits to Git."""
+    v_path = Path(req.vault_path).expanduser().resolve()
+    if not v_path.exists():
+        raise HTTPException(status_code=404, detail=f"Vault path does not exist: {v_path}")
+
+    try:
+        res = wa.apply_chapter_data(
+            vault_path=v_path,
+            chapter_num=req.chapter_num,
+            title=req.title,
+            status=req.status,
+            data=req.data,
+        )
+        return {
+            "status": "ok",
+            "message": f"Chapter {req.chapter_num} ('{req.title}') applied to vault and committed to Git!",
+            "details": res,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/process")
 async def process_chapter_stream(req: ProcessRequest):
-    """Stream progress of chapter processing via Server-Sent Events."""
+    """Stream progress of chapter analysis via Server-Sent Events (does NOT write vault files until approved)."""
     async def event_generator() -> AsyncGenerator[str, None]:
         # 1. Validation
         yield json.dumps({
             "step": "validate",
-            "progress": 10,
+            "progress": 15,
             "message": "Validating vault path and draft text...",
         })
         await asyncio.sleep(0.1)
@@ -460,10 +500,12 @@ async def process_chapter_stream(req: ProcessRequest):
             yield json.dumps({"step": "error", "error": "No draft content provided. Either paste text or select a file."})
             return
 
+        already_exists = wa.chapter_exists(v_path, req.chapter_num)
+
         # 2. Context Gathering
         yield json.dumps({
             "step": "context",
-            "progress": 25,
+            "progress": 35,
             "message": "Gathering context from 00_Bible, Characters, Timeline, Threads...",
         })
         await asyncio.sleep(0.1)
@@ -473,7 +515,7 @@ async def process_chapter_stream(req: ProcessRequest):
         # 3. Model Invocation
         yield json.dumps({
             "step": "llm_start",
-            "progress": 40,
+            "progress": 55,
             "message": f"Sending context and draft to LM Studio model '{req.model}'...",
         })
         await asyncio.sleep(0.1)
@@ -494,69 +536,27 @@ async def process_chapter_stream(req: ProcessRequest):
 
         yield json.dumps({
             "step": "llm_done",
-            "progress": 65,
-            "message": "Structured story data extracted successfully.",
+            "progress": 85,
+            "message": "Structured story data & editorial propositions extracted successfully.",
             "data": data,
         })
         await asyncio.sleep(0.1)
 
-        # 4. Write Chapter Note
+        # 4. Ready for author review (vault files remain untouched until author approves)
         yield json.dumps({
-            "step": "saving_chapter",
-            "progress": 75,
-            "message": f"Writing Chapters/Chapter_{int(req.chapter_num):02d}.md...",
-        })
-        ch_note_path = wa.write_chapter_note(
-            v_path,
-            req.chapter_num,
-            req.title,
-            data.get("pov_character", "unclear"),
-            req.status or "draft",
-            data["summary"],
-            data.get("editorial_suggestions"),
-        )
-
-        # 5. Characters
-        chars_updated = []
-        for c in data.get("characters", []):
-            wa.update_character(v_path, c["name"], c.get("is_new", False), c["update"], req.chapter_num)
-            chars_updated.append(c["name"])
-
-        yield json.dumps({
-            "step": "updating_characters",
-            "progress": 82,
-            "message": f"Updated {len(chars_updated)} character dossiers ({', '.join(chars_updated)}).",
-            "characters": chars_updated,
-        })
-
-        # 6. Timeline
-        if data.get("timeline_events"):
-            wa.append_timeline_events(v_path, data["timeline_events"], req.chapter_num)
-        yield json.dumps({
-            "step": "updating_timeline",
-            "progress": 88,
-            "message": f"Appended {len(data.get('timeline_events', []))} timeline event(s).",
-        })
-
-        # 7. Threads
-        if data.get("threads"):
-            wa.update_threads(v_path, data["threads"], req.chapter_num)
-        yield json.dumps({
-            "step": "updating_threads",
-            "progress": 92,
-            "message": f"Updated {len(data.get('threads', []))} plot thread(s).",
-        })
-
-        # 8. Log and Git
-        wa.append_log(v_path, req.chapter_num, req.title, data)
-        wa.git_commit(v_path, f"Chapter {req.chapter_num}: {req.title}")
-
-        yield json.dumps({
-            "step": "complete",
+            "step": "ready_for_review",
             "progress": 100,
-            "message": f"Chapter {req.chapter_num} processed and committed to Git!",
+            "message": f"Draft analysis complete for Chapter {req.chapter_num}! Review remarks below and approve when ready.",
+            "already_exists": already_exists,
+            "staged_data": {
+                "vault_path": str(v_path),
+                "chapter_num": req.chapter_num,
+                "title": req.title,
+                "status": req.status or "draft",
+                "data": data,
+            },
             "result": {
-                "summary": data["summary"],
+                "summary": data.get("summary", ""),
                 "pov": data.get("pov_character", "unclear"),
                 "characters": data.get("characters", []),
                 "timeline_events": data.get("timeline_events", []),

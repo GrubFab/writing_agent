@@ -746,3 +746,117 @@ textarea.draft-editor {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-faint);
 }
+
+/* Staged Review & Author Approval */
+.process-subtext {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-top: 0.45rem;
+  line-height: 1.4;
+}
+
+.chapter-status-indicator {
+  font-size: 0.72rem;
+  margin-top: 0.25rem;
+  font-weight: 500;
+  display: block;
+}
+.chapter-status-indicator.exists {
+  color: var(--amber);
+}
+.chapter-status-indicator.new {
+  color: var(--emerald);
+}
+
+.staged-action-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(59, 130, 246, 0.08));
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+  transition: all 0.2s ease;
+}
+
+.staged-action-bar.applied {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08));
+  border-color: var(--emerald);
+}
+
+.staged-status {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  max-width: 65%;
+}
+
+.staged-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.staged-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-main);
+  margin-bottom: 0.15rem;
+}
+
+.staged-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.badge-existing {
+  display: inline-block;
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  margin-top: 0.35rem;
+}
+
+.staged-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.btn-apply {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  padding: 0.65rem 1.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-apply:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+}
+
+.btn-apply:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+

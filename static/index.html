@@ -138,6 +138,7 @@
           <div class="form-group">
             <label for="input-chapter-num">Chapter #</label>
             <input type="number" id="input-chapter-num" value="1" min="1">
+            <span id="chapter-exists-indicator" class="chapter-status-indicator" style="display:none;"></span>
           </div>
           <div class="form-group">
             <label for="input-title">Title</label>
@@ -193,8 +194,11 @@
         <!-- Run Button -->
         <button class="btn-primary" id="btn-process">
           <span>⚡</span>
-          <span id="btn-process-text">Process Chapter Draft</span>
+          <span id="btn-process-text">Analyze Chapter Draft</span>
         </button>
+        <div class="process-subtext">
+          Extracts remarks, dialogue coaching & story data for your review — vault files are only updated after you approve.
+        </div>
       </section>
 
       <!-- Live Execution Pipeline ("See what is going on") -->
@@ -212,7 +216,7 @@
           <div class="step-card" id="step-validate">1. Validate</div>
           <div class="step-card" id="step-context">2. Context</div>
           <div class="step-card" id="step-llm">3. LLM Analysis</div>
-          <div class="step-card" id="step-save">4. Merge & Git</div>
+          <div class="step-card" id="step-review">4. Author Review</div>
         </div>
 
         <div class="console-box" id="console-stream">Ready to process...</div>
@@ -223,6 +227,27 @@
         <div class="section-title">
           <span>🎯</span>
           <span>Chapter Processing Results</span>
+        </div>
+
+        <!-- Staged Review & Approval Action Banner -->
+        <div class="staged-action-bar" id="staged-action-bar">
+          <div class="staged-status">
+            <span class="staged-icon" id="staged-icon">📋</span>
+            <div>
+              <div class="staged-title" id="staged-title">Staged Analysis — Ready for Author Review</div>
+              <div class="staged-desc" id="staged-desc">Review remarks & propositions below. Vault files have <strong>not</strong> been touched yet.</div>
+              <div id="staged-exists-badge" class="badge-existing" style="display:none;">
+                ℹ️ Chapter <span id="badge-ch-num">1</span> already exists in vault — approving will update dossiers & timeline in-place without duplicating.
+              </div>
+            </div>
+          </div>
+          <div class="staged-buttons">
+            <button class="btn-secondary" id="btn-discard-staged">❌ Discard</button>
+            <button class="btn-apply" id="btn-apply-to-vault">
+              <span>✅</span>
+              <span id="btn-apply-text">Approve & Apply to Vault</span>
+            </button>
+          </div>
         </div>
 
         <!-- Continuity Alert if flags exist -->
