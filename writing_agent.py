@@ -39,13 +39,18 @@ DEFAULT_BASE_URL = "http://localhost:1234/v1"
 AUTO_MARK_START = "<!-- AGENT:AUTO-UPDATES:START -->"
 AUTO_MARK_END = "<!-- AGENT:AUTO-UPDATES:END -->"
 
-SYSTEM_PROMPT = """You are a meticulous story-bible assistant for a novelist.
-You will be given: (1) compact context about existing characters, open plot
-threads, and recent timeline events, and (2) the full text of a new chapter
-draft. Extract structured data about what happens in this chapter.
+SYSTEM_PROMPT = """You are a meticulous story-bible assistant and perceptive literary editor for a novelist.
+You will be given: (1) compact context about the story bible, existing characters, open plot
+threads, and timeline, and (2) the full text of a new chapter draft.
 
-Respond with ONLY a single JSON object, no markdown fences, no commentary,
-matching exactly this schema:
+Your mission:
+1. Extract structured story tracking data (summary, POV, characters, timeline, threads, continuity flags).
+2. Act as a discerning, "cibliste" editorial advisor:
+   - Evaluate whether dialogue sounds spoken, authentic, and natural rather than literal or bookish.
+   - Respect cultural and linguistic authenticity ("cibliste plutôt que sourcier") — avoiding translated clichés, anglicisms, or stiff literary exposition.
+   - Offer 2-4 targeted, constructive propositions to polish cadence, rhythm, or dialogue, without imposing.
+
+Respond with ONLY a single JSON object, no markdown fences, no commentary, matching exactly this schema:
 
 {
   "summary": "3-6 sentence summary of the chapter",
@@ -59,7 +64,26 @@ matching exactly this schema:
   "threads": [
     {"name": "short thread name, consistent with prior naming if this thread already exists", "status": "opened|advanced|closed", "note": "1-2 sentences"}
   ],
-  "continuity_flags": ["any inconsistency, contradiction, or question the author should check"]
+  "continuity_flags": ["any inconsistency, contradiction, or question the author should check"],
+  "editorial_suggestions": {
+    "strengths": ["1-3 bullet points of what works effectively in this draft (tension, atmosphere, voice)"],
+    "style_assessment": "2-3 sentences evaluating pacing, tone, and idiomatic flow against the story bible",
+    "dialogue_coaching": [
+      {
+        "character": "character name",
+        "original_line": "exact quote from dialogue",
+        "critique": "why it feels stilted, out of register, or literal",
+        "proposition": "a more natural, spoken, and authentic alternative"
+      }
+    ],
+    "prose_propositions": [
+      {
+        "original_excerpt": "short phrase or sentence from the draft",
+        "issue": "cliché, awkward rhythm, or stilted phrasing",
+        "proposition": "suggested alternative enhancing flow or resonance"
+      }
+    ]
+  }
 }
 
 Only include characters/threads that are actually relevant to THIS chapter.
@@ -76,7 +100,7 @@ FOLDERS = ["00_Bible", "Characters", "Chapters", "Timeline", "Threads", "Log"]
 STARTER_FILES = {
     "00_Bible/premise.md": "# Premise\n\n(Write your one-paragraph premise here.)\n",
     "00_Bible/themes.md": "# Themes\n\n- \n",
-    "00_Bible/style_guide.md": "# Style guide\n\n- POV: \n- Tense: \n- Tone: \n",
+    "00_Bible/style_guide.md": "# Style guide\n\n## Narrative Stance\n- POV: Third person limited\n- Tense: Past\n- Tone: Immersive, grounded\n\n## Linguistic Charter (Cibliste vs Sourcier)\n- **Register & Voice**: Idiomatique, oralisé, langue vivante et incarnée (éviter les tournures artificielles ou calquées).\n- **Dialogues**: Rythme parlé naturel, syntaxe souple, sans lourdeurs livresques.\n- **Régionalismes / Terroir**: Vocabulaire ancré, expressions imagées locales si pertinent.\n- **Pièges à éviter**: Anglicismes masqués, tics de traduction (répétitions de soupirs, hochements de tête, fioritures d'exposition).\n",
     "00_Bible/world_rules.md": "# World rules\n\n- \n",
     "Timeline/timeline.md": "# Timeline\n\n| Order / Date | Event | Characters | Chapter |\n|---|---|---|---|\n",
     "Threads/threads.md": "# Threads\n\n| Thread | Status | Last update | Chapter |\n|---|---|---|---|\n",
@@ -240,9 +264,10 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", name.strip()).strip("_")
 
 
-def write_chapter_note(vault_path: Path, chapter_num, title, pov, status, summary):
+def write_chapter_note(vault_path: Path, chapter_num, title, pov, status, summary, editorial_suggestions=None):
     path = vault_path / "Chapters" / f"Chapter_{int(chapter_num):02d}.md"
-    content = f"""---
+    parts = [
+        f"""---
 chapter: {chapter_num}
 title: "{title}"
 pov: "{pov}"
@@ -253,6 +278,42 @@ date_updated: {datetime.now().date().isoformat()}
 ## Summary
 {summary}
 """
+    ]
+
+    if editorial_suggestions and isinstance(editorial_suggestions, dict):
+        ed_parts = ["## Editorial Notes & Propositions\n"]
+        strengths = editorial_suggestions.get("strengths", [])
+        if strengths:
+            ed_parts.append("### Strengths\n" + "\n".join(f"- {s}" for s in strengths) + "\n")
+
+        style = editorial_suggestions.get("style_assessment")
+        if style:
+            ed_parts.append(f"### Style & Pacing Assessment\n{style}\n")
+
+        dc = editorial_suggestions.get("dialogue_coaching", [])
+        if dc:
+            ed_parts.append("### Dialogue Coaching")
+            for item in dc:
+                char = item.get("character", "Character")
+                orig = item.get("original_line", "")
+                crit = item.get("critique", "")
+                prop = item.get("proposition", "")
+                ed_parts.append(f"- **{char}**: *\"{orig}\"*\n  - **Note**: {crit}\n  - **Proposition**: *\"{prop}\"*")
+            ed_parts.append("")
+
+        pp = editorial_suggestions.get("prose_propositions", [])
+        if pp:
+            ed_parts.append("### Prose & Rhythm Propositions")
+            for item in pp:
+                orig = item.get("original_excerpt", "")
+                issue = item.get("issue", "")
+                prop = item.get("proposition", "")
+                ed_parts.append(f"- *\"{orig}\"* ({issue})\n  - **Proposition**: *\"{prop}\"*")
+            ed_parts.append("")
+
+        parts.append("\n".join(ed_parts))
+
+    content = "".join(parts)
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -390,7 +451,15 @@ def process_chapter(args):
         raise SystemExit(f"\nError: {e}")
 
     status = args.status or "draft"
-    write_chapter_note(vault_path, args.chapter, args.title, data.get("pov_character", "unclear"), status, data["summary"])
+    write_chapter_note(
+        vault_path,
+        args.chapter,
+        args.title,
+        data.get("pov_character", "unclear"),
+        status,
+        data["summary"],
+        data.get("editorial_suggestions"),
+    )
 
     for c in data.get("characters", []):
         update_character(vault_path, c["name"], c.get("is_new", False), c["update"], args.chapter)
@@ -409,6 +478,11 @@ def process_chapter(args):
     print(f"- {len(data.get('characters', []))} character note(s) updated")
     print(f"- {len(data.get('timeline_events', []))} timeline event(s) added")
     print(f"- {len(data.get('threads', []))} thread(s) updated")
+    ed = data.get("editorial_suggestions")
+    if ed and isinstance(ed, dict):
+        d_count = len(ed.get("dialogue_coaching", []))
+        p_count = len(ed.get("prose_propositions", []))
+        print(f"- 💡 Editorial propositions: {d_count} dialogue, {p_count} prose/rhythm")
     if data.get("continuity_flags"):
         print("- ⚠️  Continuity flags — check the log:")
         for f in data["continuity_flags"]:

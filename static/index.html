@@ -217,6 +217,7 @@
         <!-- Result Tabs -->
         <div class="result-tabs">
           <button class="result-tab-btn active" data-res-tab="res-summary">Summary & POV</button>
+          <button class="result-tab-btn" data-res-tab="res-editorial" style="color:var(--accent);">💡 Editorial Propositions</button>
           <button class="result-tab-btn" data-res-tab="res-characters">Character Updates</button>
           <button class="result-tab-btn" data-res-tab="res-timeline">Timeline Events</button>
           <button class="result-tab-btn" data-res-tab="res-threads">Threads</button>
@@ -230,6 +231,10 @@
           <div id="res-git-badge" class="commit-badge" style="display:none;">
             <span>✓ Committed to Git</span>
           </div>
+        </div>
+
+        <div id="res-editorial" class="res-pane" style="display:none;">
+          <div id="res-editorial-content" class="explorer-list"></div>
         </div>
 
         <div id="res-characters" class="res-pane" style="display:none;">

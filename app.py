@@ -314,6 +314,7 @@ async def process_chapter_stream(req: ProcessRequest):
             data.get("pov_character", "unclear"),
             req.status or "draft",
             data["summary"],
+            data.get("editorial_suggestions"),
         )
 
         # 5. Characters
@@ -362,6 +363,7 @@ async def process_chapter_stream(req: ProcessRequest):
                 "timeline_events": data.get("timeline_events", []),
                 "threads": data.get("threads", []),
                 "continuity_flags": data.get("continuity_flags", []),
+                "editorial_suggestions": data.get("editorial_suggestions", {}),
             },
         })
 

@@ -561,6 +561,141 @@ function renderResults(result) {
     thrList.innerHTML = '<div style="font-size:0.8rem; color:var(--text-faint);">No plot threads updated.</div>';
   }
 
+  // Editorial Propositions
+  const edContainer = document.getElementById("res-editorial-content");
+  if (edContainer) {
+    renderEditorialSuggestions(result.editorial_suggestions, edContainer);
+  }
+
   // Scroll smoothly to results
   resultsSection.scrollIntoView({ behavior: "smooth" });
 }
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function escapeQuotes(str) {
+  if (!str) return "";
+  return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, " ");
+}
+
+function renderEditorialSuggestions(ed, container) {
+  container.innerHTML = "";
+  if (!ed || (typeof ed !== 'object') || Object.keys(ed).length === 0) {
+    container.innerHTML = '<div style="font-size:0.85rem; color:var(--text-faint);">No editorial propositions returned for this chapter.</div>';
+    return;
+  }
+
+  // 1. Strengths
+  if (ed.strengths && ed.strengths.length > 0) {
+    const strBox = document.createElement("div");
+    strBox.className = "explorer-card";
+    strBox.style.borderColor = "rgba(16, 185, 129, 0.4)";
+    strBox.style.background = "rgba(16, 185, 129, 0.05)";
+    strBox.innerHTML = `
+      <div class="explorer-card-title" style="color:var(--emerald);">
+        <span>✨ Strengths & Highlights</span>
+      </div>
+      <ul style="margin-left: 1.25rem; font-size: 0.85rem; color: var(--text-main);">
+        ${ed.strengths.map(s => `<li style="margin-bottom:0.25rem;">${escapeHtml(s)}</li>`).join("")}
+      </ul>
+    `;
+    container.appendChild(strBox);
+  }
+
+  // 2. Style & Pacing Assessment
+  if (ed.style_assessment) {
+    const styleBox = document.createElement("div");
+    styleBox.className = "explorer-card";
+    styleBox.innerHTML = `
+      <div class="explorer-card-title">
+        <span>🎭 Style & Pacing Assessment</span>
+      </div>
+      <div class="explorer-card-desc" style="font-size:0.88rem; color:var(--text-main);">${escapeHtml(ed.style_assessment)}</div>
+    `;
+    container.appendChild(styleBox);
+  }
+
+  // 3. Dialogue Coaching
+  if (ed.dialogue_coaching && ed.dialogue_coaching.length > 0) {
+    const diaHeading = document.createElement("div");
+    diaHeading.innerHTML = `<h4 style="margin: 0.8rem 0 0.4rem 0; font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase;">🗣️ Dialogue Coaching ("Cibliste" / Authentic Orality)</h4>`;
+    container.appendChild(diaHeading);
+
+    ed.dialogue_coaching.forEach(d => {
+      const card = document.createElement("div");
+      card.className = "explorer-card";
+      card.innerHTML = `
+        <div class="explorer-card-title">
+          <span>👤 ${escapeHtml(d.character || 'Character')}</span>
+          <span class="badge badge-advanced">Dialogue</span>
+        </div>
+        <div style="font-size:0.85rem; color:var(--text-muted); font-style:italic; margin-bottom:0.4rem;">
+          "${escapeHtml(d.original_line || '')}"
+        </div>
+        <div style="font-size:0.8rem; color:var(--amber); margin-bottom:0.4rem;">
+          <strong>Critique:</strong> ${escapeHtml(d.critique || '')}
+        </div>
+        <div style="background:var(--bg-input); padding:0.5rem 0.75rem; border-radius:6px; border-left:3px solid var(--accent); display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.88rem; color:var(--emerald);">
+            <strong>Proposition:</strong> "${escapeHtml(d.proposition || '')}"
+          </div>
+          <button class="btn-secondary copy-btn" style="padding:0.2rem 0.5rem; font-size:0.75rem;">📋 Copy</button>
+        </div>
+      `;
+      const copyBtn = card.querySelector(".copy-btn");
+      if (copyBtn && d.proposition) {
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(d.proposition);
+          copyBtn.textContent = "✓ Copied!";
+          setTimeout(() => { copyBtn.textContent = "📋 Copy"; }, 2000);
+        });
+      }
+      container.appendChild(card);
+    });
+  }
+
+  // 4. Prose & Rhythm Propositions
+  if (ed.prose_propositions && ed.prose_propositions.length > 0) {
+    const proseHeading = document.createElement("div");
+    proseHeading.innerHTML = `<h4 style="margin: 0.8rem 0 0.4rem 0; font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase;">✍️ Prose, Cadence & Phrasing Propositions</h4>`;
+    container.appendChild(proseHeading);
+
+    ed.prose_propositions.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "explorer-card";
+      card.innerHTML = `
+        <div class="explorer-card-title">
+          <span style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(p.issue || 'Suggestion')}</span>
+          <span class="badge badge-opened">Style</span>
+        </div>
+        <div style="font-size:0.85rem; color:var(--text-muted); font-style:italic; margin-bottom:0.4rem;">
+          "${escapeHtml(p.original_excerpt || '')}"
+        </div>
+        <div style="background:var(--bg-input); padding:0.5rem 0.75rem; border-radius:6px; border-left:3px solid var(--accent); display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:0.88rem; color:var(--emerald);">
+            <strong>Proposition:</strong> "${escapeHtml(p.proposition || '')}"
+          </div>
+          <button class="btn-secondary copy-btn" style="padding:0.2rem 0.5rem; font-size:0.75rem;">📋 Copy</button>
+        </div>
+      `;
+      const copyBtn = card.querySelector(".copy-btn");
+      if (copyBtn && p.proposition) {
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(p.proposition);
+          copyBtn.textContent = "✓ Copied!";
+          setTimeout(() => { copyBtn.textContent = "📋 Copy"; }, 2000);
+        });
+      }
+      container.appendChild(card);
+    });
+  }
+}
+
