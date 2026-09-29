@@ -145,8 +145,20 @@ def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict
         "temperature": 0.2,
         "max_tokens": 2000,
     }
-    resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=300)
-    resp.raise_for_status()
+    try:
+        resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=300)
+        resp.raise_for_status()
+    except requests.exceptions.ConnectionError:
+        raise SystemExit(
+            f"\nError: Could not connect to LM Studio at '{base_url}'.\n"
+            "Please ensure LM Studio is running and the local server has been started:\n"
+            "  1. Open LM Studio\n"
+            "  2. Go to the Developer tab (or Local Server icon <-> on the left)\n"
+            "  3. Select your model and click 'Start Server'\n"
+        )
+    except requests.exceptions.HTTPError as e:
+        raise SystemExit(f"\nLM Studio API returned an error ({resp.status_code}): {resp.text}")
+
     raw = resp.json()["choices"][0]["message"]["content"]
 
     cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
@@ -291,7 +303,22 @@ def git_commit(vault_path: Path, message: str):
 
 def process_chapter(args):
     vault_path = Path(args.vault).expanduser().resolve()
-    chapter_text = Path(args.chapter_file).read_text(encoding="utf-8")
+    if not vault_path.exists() or not vault_path.is_dir():
+        raise SystemExit(
+            f"\nError: Vault directory not found: {args.vault}\n"
+            f"Resolved path: {vault_path}\n"
+            "Please check the path or run 'writing-agent init <vault>' first."
+        )
+
+    chapter_path = Path(args.chapter_file).expanduser().resolve()
+    if not chapter_path.exists():
+        raise SystemExit(
+            f"\nError: Chapter file not found: {args.chapter_file}\n"
+            f"Resolved path: {chapter_path}\n"
+            "Please provide the path to your actual chapter draft text file (e.g. .\\chapter1.txt or C:\\path\\to\\draft.txt)."
+        )
+
+    chapter_text = chapter_path.read_text(encoding="utf-8")
 
     context = gather_context(vault_path)
     print("Calling local model...")
