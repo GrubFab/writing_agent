@@ -88,7 +88,10 @@ Respond with ONLY a single JSON object, no markdown fences, no commentary, match
 
 Only include characters/threads that are actually relevant to THIS chapter.
 Do not invent facts not present in the chapter text or the provided context.
-If nothing applies to a list, return an empty list."""
+If nothing applies to a list, return an empty list.
+
+REASONING & TOKEN BUDGET INSTRUCTION:
+If you are a reasoning or thinking model, keep your internal reasoning / chain-of-thought concise (under 250 words). Allocate your token budget to generating the complete, unabbreviated JSON object without running out of tokens."""
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +158,71 @@ def gather_context(vault_path: Path, max_chars_per_section=4000) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM call
+# LLM call & Robust JSON Extraction
 # ---------------------------------------------------------------------------
 
-def extract_json(raw: str) -> dict:
+def repair_truncated_json(candidate: str) -> dict:
+    """Attempts to salvage and repair truncated or unclosed JSON by balancing brackets."""
+    start = candidate.find("{")
+    if start == -1:
+        raise ValueError("No JSON object found in output.")
+    text = candidate[start:]
+
+    for i in range(len(text), 10, -1):
+        sub = text[:i].rstrip()
+        sub = re.sub(r',\s*$', '', sub)
+        sub = re.sub(r':\s*"?$', '', sub)
+        sub = re.sub(r',\s*"[^"]*"?$', '', sub)
+        sub = re.sub(r'{\s*"[^"]*"?$', '{', sub)
+        sub = re.sub(r',\s*$', '', sub)
+
+        in_string = False
+        escape = False
+        open_brackets = []
+        for char in sub:
+            if escape:
+                escape = False
+                continue
+            if char == '\\':
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+            elif not in_string:
+                if char in '{[':
+                    open_brackets.append(char)
+                elif char in '}]':
+                    if open_brackets:
+                        open_brackets.pop()
+
+        if in_string:
+            sub += '"'
+
+        for b in reversed(open_brackets):
+            if b == '{':
+                sub += '}'
+            elif b == '[':
+                sub += ']'
+
+        try:
+            parsed = json.loads(sub)
+            if isinstance(parsed, dict) and ("summary" in parsed or "characters" in parsed):
+                return parsed
+        except Exception:
+            continue
+
+    raise ValueError("Could not repair truncated JSON.")
+
+
+def extract_json(raw: str, finish_reason: str = None, model: str = "") -> dict:
     if not raw or not raw.strip():
-        raise ValueError("Model returned an empty response. Check if max_tokens was reached or if the model supports the prompt.")
+        if finish_reason == "length":
+            raise ValueError(
+                f"Model token limit reached (finish_reason: 'length').\n\n"
+                f"The model '{model}' spent all tokens on internal reasoning before outputting content.\n"
+                f"Fix in LM Studio: increase Context Length or disable/reduce Thinking for this model."
+            )
+        raise ValueError("Model returned an empty response. Verify in LM Studio that the model is loaded properly.")
 
     # Remove <think>...</think> tags if reasoning model used them
     cleaned = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
@@ -191,7 +253,34 @@ def extract_json(raw: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Fallback log and error
+    # Try 4: attempt structured repair if output was truncated
+    try:
+        repaired = repair_truncated_json(cleaned)
+        # Ensure minimum required fields exist
+        if "summary" in repaired:
+            repaired.setdefault("pov_character", "unclear")
+            repaired.setdefault("characters", [])
+            repaired.setdefault("timeline_events", [])
+            repaired.setdefault("threads", [])
+            repaired.setdefault("continuity_flags", [])
+            repaired.setdefault("editorial_suggestions", {})
+            return repaired
+    except Exception:
+        pass
+
+    # Fallback diagnostics: if model hit token limit
+    if finish_reason == "length":
+        raise ValueError(
+            f"Model token limit reached (finish_reason: 'length').\n\n"
+            f"The model '{model}' spent its generation token budget (often on internal thinking/reasoning) and was cut off before finishing the JSON response.\n\n"
+            f"To resolve this in LM Studio:\n"
+            f"  1. Increase 'Context Length' in LM Studio for '{model}' (e.g. set to 8192 or 16384 in model settings).\n"
+            f"  2. Or disable / reduce 'Thinking' in LM Studio's right-hand settings panel.\n"
+            f"  3. Or select an instruct model (e.g. Mistral, Llama 3.1/3.3, Gemma 2) that outputs directly without burning tokens on internal monologue.\n\n"
+            f"Truncated model output was:\n{raw[:300]}..."
+        )
+
+    # General parse error
     print("--- RAW MODEL OUTPUT (could not parse as JSON) ---")
     print(raw)
     raise ValueError(f"Failed to parse model output as JSON. Output was:\n{raw[:400]}")
@@ -206,7 +295,7 @@ def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.2,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "response_format": {"type": "json_object"},
     }
 
@@ -243,17 +332,7 @@ def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict
     if not raw.strip() and reasoning.strip():
         raw = reasoning
 
-    if not raw.strip():
-        if finish_reason == "length":
-            raise ValueError(
-                "Model hit the token limit (max_tokens) before generating the answer.\n"
-                "Try using a model with a larger context window, or check if the model's reasoning/thinking consumed all tokens."
-            )
-        raise ValueError(
-            "Model returned an empty response. Verify in LM Studio that the model is loaded properly and not out of memory."
-        )
-
-    return extract_json(raw)
+    return extract_json(raw, finish_reason=finish_reason, model=model)
 
 
 # ---------------------------------------------------------------------------
