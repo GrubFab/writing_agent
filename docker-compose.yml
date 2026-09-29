@@ -1,0 +1,17 @@
+services:
+  writing-agent:
+    build: .
+    container_name: writing-agent-ui
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount your local Obsidian vault into the container
+      # On Windows, path uses forward slashes in docker-compose
+      - "C:/Users/FSGee/Nextcloud/book/Cold/vault/MyNovelVault:/vault"
+    environment:
+      - WRITING_AGENT_VAULT=/vault
+      # Reaches LM Studio running on the host machine
+      - LM_STUDIO_BASE_URL=http://host.docker.internal:1234/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

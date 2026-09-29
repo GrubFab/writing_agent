@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Writing Agent — Story Bible & Chapter Tracker</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">✍</div>
+      <span>Writing Agent</span>
+      <span style="font-size:0.75rem; color:var(--text-faint); margin-left:4px;">v1.0</span>
+    </div>
+
+    <div class="header-meta">
+      <!-- Vault Selector -->
+      <div class="vault-badge" id="vault-badge" title="Click to change vault">
+        <span>📁</span>
+        <span id="current-vault-label">Loading vault...</span>
+      </div>
+
+      <!-- LM Studio Connection Status -->
+      <div class="status-badge offline" id="status-badge" title="Click to refresh connection">
+        <span class="dot"></span>
+        <span id="status-text">LM Studio Offline</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <div class="app-container">
+    
+    <!-- Left Sidebar: Vault Explorer -->
+    <aside class="sidebar">
+      <!-- Tabs -->
+      <div class="sidebar-tabs">
+        <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+        <button class="tab-btn" data-tab="tab-characters">Characters</button>
+        <button class="tab-btn" data-tab="tab-timeline">Timeline</button>
+        <button class="tab-btn" data-tab="tab-threads">Threads</button>
+        <button class="tab-btn" data-tab="tab-bible">Bible</button>
+      </div>
+
+      <!-- Tab Content Area -->
+      <div class="sidebar-content">
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-pane">
+          <div class="vault-stat-grid">
+            <div class="stat-card">
+              <div class="stat-num" id="stat-chapters">0</div>
+              <div class="stat-label">Chapters</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-characters">0</div>
+              <div class="stat-label">Characters</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-threads">0</div>
+              <div class="stat-label">Open Threads</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-timeline">0</div>
+              <div class="stat-label">Timeline Events</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 1rem;">
+            <label style="margin-bottom:0.5rem; display:block;">Vault Actions</label>
+            <div style="display:flex; flex-direction:column; gap:0.5rem;">
+              <button class="btn-secondary" id="btn-reload-vault">🔄 Reload Vault Data</button>
+              <button class="btn-secondary" id="btn-scaffold-vault">🛠️ Scaffold / Re-init Vault</button>
+            </div>
+          </div>
+
+          <div style="margin-top: 1.5rem;">
+            <label style="margin-bottom:0.5rem; display:block;">Recent Run Log</label>
+            <div id="recent-logs-list" class="explorer-list">
+              <div style="font-size:0.8rem; color:var(--text-faint);">No recent activity logged yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Characters Tab -->
+        <div id="tab-characters" class="tab-pane" style="display:none;">
+          <div id="characters-list" class="explorer-list"></div>
+        </div>
+
+        <!-- Timeline Tab -->
+        <div id="tab-timeline" class="tab-pane" style="display:none;">
+          <div id="timeline-list" class="explorer-list"></div>
+        </div>
+
+        <!-- Threads Tab -->
+        <div id="tab-threads" class="tab-pane" style="display:none;">
+          <div id="threads-list" class="explorer-list"></div>
+        </div>
+
+        <!-- Bible Tab -->
+        <div id="tab-bible" class="tab-pane" style="display:none;">
+          <div id="bible-list" class="explorer-list"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="main-view">
+
+      <!-- Process Chapter Card -->
+      <section class="section-card">
+        <div class="section-title">
+          <span>📖</span>
+          <span>Process Chapter Draft</span>
+        </div>
+
+        <!-- Meta Inputs Grid -->
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="input-chapter-num">Chapter #</label>
+            <input type="number" id="input-chapter-num" value="1" min="1">
+          </div>
+          <div class="form-group">
+            <label for="input-title">Title</label>
+            <input type="text" id="input-title" placeholder="e.g. The Beginning of the End">
+          </div>
+          <div class="form-group">
+            <label for="input-status">Status</label>
+            <select id="input-status">
+              <option value="draft">draft</option>
+              <option value="revised">revised</option>
+              <option value="final">final</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Model Row -->
+        <div class="model-row">
+          <div class="form-group">
+            <label for="select-model">LM Studio Model</label>
+            <select id="select-model">
+              <option value="" disabled selected>Scanning LM Studio models...</option>
+            </select>
+          </div>
+          <button class="btn-secondary" id="btn-refresh-models" title="Scan LM Studio for loaded models">🔄 Refresh Models</button>
+        </div>
+
+        <!-- Draft Input Mode Toggle -->
+        <div class="form-group">
+          <label>Draft Source</label>
+          <div class="toggle-group">
+            <button class="toggle-btn active" id="btn-mode-editor">✍️ Write / Paste Text</button>
+            <button class="toggle-btn" id="btn-mode-file">📁 Select File Path</button>
+          </div>
+        </div>
+
+        <!-- Editor View -->
+        <div id="view-editor" class="editor-wrapper">
+          <textarea id="input-draft-text" class="draft-editor" placeholder="Write or paste your chapter draft here...&#10;&#10;The agent will read this text, match it against your Bible, and extract characters, events, threads, and continuity notes."></textarea>
+          <div class="editor-footer">
+            <span id="word-count-badge">0 words | 0 characters</span>
+            <span style="font-size:0.75rem; color:var(--text-faint);">Auto-saved locally</span>
+          </div>
+        </div>
+
+        <!-- File Path View -->
+        <div id="view-file" class="editor-wrapper" style="display:none;">
+          <input type="text" id="input-file-path" placeholder="e.g. C:\Users\FSGee\Nextcloud\book\Cold\vault\MyNovelVault\chapter1.txt">
+          <div class="editor-footer">
+            <span>Points to any .txt or .md draft on your system</span>
+          </div>
+        </div>
+
+        <!-- Run Button -->
+        <button class="btn-primary" id="btn-process">
+          <span>⚡</span>
+          <span id="btn-process-text">Process Chapter Draft</span>
+        </button>
+      </section>
+
+      <!-- Live Execution Pipeline ("See what is going on") -->
+      <section class="section-card pipeline-container" id="pipeline-section">
+        <div class="section-title">
+          <span>⚙️</span>
+          <span>Agent Activity Pipeline</span>
+        </div>
+
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+
+        <div class="pipeline-steps">
+          <div class="step-card" id="step-validate">1. Validate</div>
+          <div class="step-card" id="step-context">2. Context</div>
+          <div class="step-card" id="step-llm">3. LLM Analysis</div>
+          <div class="step-card" id="step-save">4. Merge & Git</div>
+        </div>
+
+        <div class="console-box" id="console-stream">Ready to process...</div>
+      </section>
+
+      <!-- Live Results View -->
+      <section class="results-card" id="results-section">
+        <div class="section-title">
+          <span>🎯</span>
+          <span>Chapter Processing Results</span>
+        </div>
+
+        <!-- Continuity Alert if flags exist -->
+        <div id="continuity-alert" class="continuity-alert" style="display:none;">
+          <strong>⚠️ Continuity Flags Detected:</strong>
+          <ul id="continuity-list"></ul>
+        </div>
+
+        <!-- Result Tabs -->
+        <div class="result-tabs">
+          <button class="result-tab-btn active" data-res-tab="res-summary">Summary & POV</button>
+          <button class="result-tab-btn" data-res-tab="res-characters">Character Updates</button>
+          <button class="result-tab-btn" data-res-tab="res-timeline">Timeline Events</button>
+          <button class="result-tab-btn" data-res-tab="res-threads">Threads</button>
+        </div>
+
+        <div id="res-summary" class="res-pane">
+          <p id="res-summary-text" style="font-size:0.95rem; line-height:1.6; color:var(--text-main); margin-bottom:0.75rem;"></p>
+          <div style="font-size:0.85rem; color:var(--text-muted);">
+            <strong>POV Character:</strong> <span id="res-pov" style="color:var(--accent);"></span>
+          </div>
+          <div id="res-git-badge" class="commit-badge" style="display:none;">
+            <span>✓ Committed to Git</span>
+          </div>
+        </div>
+
+        <div id="res-characters" class="res-pane" style="display:none;">
+          <div id="res-characters-list" class="explorer-list"></div>
+        </div>
+
+        <div id="res-timeline" class="res-pane" style="display:none;">
+          <div id="res-timeline-list" class="explorer-list"></div>
+        </div>
+
+        <div id="res-threads" class="res-pane" style="display:none;">
+          <div id="res-threads-list" class="explorer-list"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

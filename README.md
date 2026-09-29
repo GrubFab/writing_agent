@@ -71,31 +71,61 @@ This will:
 
 Optional: `--status revised` or `--status final` (default is `draft`).
 
-## 4. Using it day to day in Obsidian
+## 4. Visual Dashboard & Standalone App
 
-Open the vault folder in Obsidian. Recommended plugins:
+Prefer a visual interface over the terminal? You can launch the interactive dashboard:
+
+```bash
+writing-agent app
+```
+
+Or simply **double-click** `run-app.bat`!
+
+This opens a dedicated, distraction-free desktop window displaying:
+- **Live LM Studio Status**: auto-detects loaded models directly from LM Studio.
+- **Vault Explorer**: inspect your Characters, Timeline, Threads, and Bible notes with live updates.
+- **Draft Editor**: write or paste chapter drafts directly with live word counts, or select a file path.
+- **Live Activity Pipeline**: see step-by-step progress in real time (Context Gathering → LLM Analysis → Character Updates → Git Commit).
+- **Results View**: instant summary, POV identification, and highlighted continuity flags.
+
+---
+
+## 5. Running with Docker
+
+To run the application inside an isolated Docker container:
+
+```bash
+docker compose up -d
+```
+
+Open `http://localhost:8000` in your browser.
+
+- Your vault is mounted at `/vault` and mapped to `C:/Users/FSGee/Nextcloud/book/Cold/vault/MyNovelVault` (configurable in `docker-compose.yml`).
+- LM Studio on your host machine is reached via `http://host.docker.internal:1234/v1`.
+- To stop the container: `docker compose down`.
+
+---
+
+## 6. Clean Removal & Uninstallation
+
+If you ever wish to remove this program completely:
+
+* **Windows**: Double-click `uninstall.bat` (or run `.\uninstall.ps1` in PowerShell).
+* This removes:
+  1. The `writing-agent` command executables from your system.
+  2. The local virtual environment and package caches.
+  3. Any Docker containers/images created for it.
+  4. **Your novel vault in Nextcloud is never touched and remains intact.**
+
+After running `uninstall.bat`, you can simply delete this `writing_agent` folder.
+
+---
+
+## 7. Using it day to day in Obsidian
+
+Open your vault folder in Obsidian. Recommended plugins:
 - **Dataview** — build live tables, e.g. all chapters where `status != final`,
   or all characters and their `first_appearance`, straight from the frontmatter
   this script writes.
 - **Templates** — for any notes you still write by hand.
 
-## 5. Extending it (with Antigravity, Claude Code, or by hand)
-
-The script is intentionally simple and modular so it's easy to extend. Ideas,
-roughly in order of usefulness:
-
-- **Review-before-write mode**: dump the JSON to a `_pending/` file and only
-  merge on a second `--apply` run, if you don't want to rely on git diffs.
-- **Timeline sorting**: currently events are appended in processing order;
-  you could parse in-story dates and keep the table sorted.
-- **Character relationship graph**: extract relationships too, and render
-  them as a Mermaid diagram in a note.
-- **Chunking for long chapters**: if a chapter exceeds your model's context
-  window, split it and merge the extracted JSON before writing.
-- **A "query" command**: e.g. `python writing_agent.py ask "What does Marie
-  know about the letter by chapter 10?"` — send the relevant timeline/character
-  history to the model as a read-only Q&A mode.
-
-If you hand this repo to Antigravity or Claude Code, point it at
-`writing_agent.py` and describe the extension you want — the file structure
-and JSON schema in the code comments give it what it needs to work from.

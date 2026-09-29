@@ -10,8 +10,19 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "sse-starlette>=2.0.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.scripts]
 writing-agent = "writing_agent:main"
 writing_agent = "writing_agent:main"
+
+[tool.setuptools]
+py-modules = ["writing_agent", "app"]
+
+[tool.setuptools.package-data]
+"*" = ["static/*"]
+

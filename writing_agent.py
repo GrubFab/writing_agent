@@ -366,12 +366,29 @@ def main():
     p_proc.add_argument("--model", required=True, help="Model name as loaded in LM Studio.")
     p_proc.add_argument("--base-url", dest="base_url", default=DEFAULT_BASE_URL, help=f"LM Studio API base URL (default: {DEFAULT_BASE_URL})")
 
+    p_app = sub.add_parser("app", help="Launch the Visual Web Dashboard / Window.")
+    p_app.add_argument("--host", default="127.0.0.1", help="Host address (default: 127.0.0.1)")
+    p_app.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
+    p_app.add_argument("--vault", default=None, help="Default vault path")
+    p_app.add_argument("--no-browser", action="store_true", help="Do not open browser/window automatically")
+    p_app.add_argument("--no-window", action="store_true", help="Open regular browser tab instead of dedicated app window")
+
     args = parser.parse_args()
 
     if args.command == "init":
         init_vault(Path(args.vault).expanduser().resolve())
     elif args.command == "process":
         process_chapter(args)
+    elif args.command == "app":
+        from app import launch_app
+        if args.vault:
+            os.environ["WRITING_AGENT_VAULT"] = str(Path(args.vault).expanduser().resolve())
+        launch_app(
+            host=args.host,
+            port=args.port,
+            window=not args.no_window,
+            open_browser=not args.no_browser,
+        )
 
 
 if __name__ == "__main__":
