@@ -134,6 +134,45 @@ def gather_context(vault_path: Path, max_chars_per_section=4000) -> str:
 # LLM call
 # ---------------------------------------------------------------------------
 
+def extract_json(raw: str) -> dict:
+    if not raw or not raw.strip():
+        raise ValueError("Model returned an empty response. Check if max_tokens was reached or if the model supports the prompt.")
+
+    # Remove <think>...</think> tags if reasoning model used them
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
+    if not cleaned:
+        cleaned = raw.strip()
+
+    # Try 1: direct parse
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Try 2: extract from markdown ```json ... ``` code blocks
+    markdown_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    if markdown_match:
+        try:
+            return json.loads(markdown_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Try 3: find outermost { ... }
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        json_candidate = cleaned[first_brace : last_brace + 1]
+        try:
+            return json.loads(json_candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback log and error
+    print("--- RAW MODEL OUTPUT (could not parse as JSON) ---")
+    print(raw)
+    raise ValueError(f"Failed to parse model output as JSON. Output was:\n{raw[:400]}")
+
+
 def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict:
     user_content = f"CONTEXT:\n{context}\n\n---\n\nNEW CHAPTER DRAFT:\n{chapter_text}"
     payload = {
@@ -143,31 +182,54 @@ def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.2,
-        "max_tokens": 2000,
+        "max_tokens": 4096,
+        "response_format": {"type": "json_object"},
     }
+
     try:
         resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=300)
+        # If model does not support response_format, retry without it
+        if resp.status_code == 400 and "response_format" in resp.text:
+            payload.pop("response_format", None)
+            resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=300)
         resp.raise_for_status()
     except requests.exceptions.ConnectionError:
-        raise SystemExit(
-            f"\nError: Could not connect to LM Studio at '{base_url}'.\n"
+        raise ConnectionError(
+            f"Could not connect to LM Studio at '{base_url}'.\n"
             "Please ensure LM Studio is running and the local server has been started:\n"
             "  1. Open LM Studio\n"
             "  2. Go to the Developer tab (or Local Server icon <-> on the left)\n"
             "  3. Select your model and click 'Start Server'\n"
         )
-    except requests.exceptions.HTTPError as e:
-        raise SystemExit(f"\nLM Studio API returned an error ({resp.status_code}): {resp.text}")
+    except requests.exceptions.HTTPError:
+        raise RuntimeError(f"LM Studio API returned an error ({resp.status_code}): {resp.text}")
 
-    raw = resp.json()["choices"][0]["message"]["content"]
+    data = resp.json()
+    choices = data.get("choices", [])
+    if not choices:
+        raise ValueError(f"LM Studio returned no choices in response: {data}")
 
-    cleaned = re.sub(r"^```(json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError as e:
-        print("--- RAW MODEL OUTPUT (could not parse as JSON) ---")
-        print(raw)
-        raise SystemExit(f"Failed to parse model output as JSON: {e}")
+    choice = choices[0]
+    msg = choice.get("message", {})
+    raw = msg.get("content") or ""
+    reasoning = msg.get("reasoning_content") or ""
+    finish_reason = choice.get("finish_reason")
+
+    # If content is empty but reasoning is present (common in DeepSeek R1 / QwQ)
+    if not raw.strip() and reasoning.strip():
+        raw = reasoning
+
+    if not raw.strip():
+        if finish_reason == "length":
+            raise ValueError(
+                "Model hit the token limit (max_tokens) before generating the answer.\n"
+                "Try using a model with a larger context window, or check if the model's reasoning/thinking consumed all tokens."
+            )
+        raise ValueError(
+            "Model returned an empty response. Verify in LM Studio that the model is loaded properly and not out of memory."
+        )
+
+    return extract_json(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +384,10 @@ def process_chapter(args):
 
     context = gather_context(vault_path)
     print("Calling local model...")
-    data = call_llm(args.base_url, args.model, context, chapter_text)
+    try:
+        data = call_llm(args.base_url, args.model, context, chapter_text)
+    except Exception as e:
+        raise SystemExit(f"\nError: {e}")
 
     status = args.status or "draft"
     write_chapter_note(vault_path, args.chapter, args.title, data.get("pov_character", "unclear"), status, data["summary"])
