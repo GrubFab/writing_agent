@@ -69,17 +69,216 @@ class ProcessRequest(BaseModel):
     draft_file: Optional[str] = None
 
 
+class ProjectSwitchRequest(BaseModel):
+    project_id: str
+
+
+class NewProjectRequest(BaseModel):
+    name: str
+    vault_path: Optional[str] = None
+    premise: Optional[str] = None
+    init_git: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Project Management Storage
+# ---------------------------------------------------------------------------
+
+CONFIG_DIR = Path.home() / ".writing_agent"
+PROJECTS_FILE = CONFIG_DIR / "projects.json"
+DEFAULT_PARENT_DIR = r"C:\Users\FSGee\Nextcloud\book"
+
+
+def get_projects_data() -> dict:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not PROJECTS_FILE.exists():
+        initial = {
+            "active_id": "cold",
+            "projects": [
+                {
+                    "id": "cold",
+                    "name": "Cold",
+                    "path": str(Path(DEFAULT_VAULT).resolve()),
+                    "created_at": datetime.now().isoformat(),
+                    "last_opened": datetime.now().isoformat(),
+                }
+            ],
+        }
+        PROJECTS_FILE.write_text(json.dumps(initial, indent=2), encoding="utf-8")
+        return initial
+
+    try:
+        data = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
+        if not data.get("projects"):
+            data["projects"] = [{
+                "id": "cold",
+                "name": "Cold",
+                "path": str(Path(DEFAULT_VAULT).resolve()),
+                "created_at": datetime.now().isoformat(),
+                "last_opened": datetime.now().isoformat(),
+            }]
+            data["active_id"] = "cold"
+        return data
+    except Exception:
+        return {
+            "active_id": "cold",
+            "projects": [
+                {
+                    "id": "cold",
+                    "name": "Cold",
+                    "path": str(Path(DEFAULT_VAULT).resolve()),
+                    "created_at": datetime.now().isoformat(),
+                    "last_opened": datetime.now().isoformat(),
+                }
+            ],
+        }
+
+
+def save_projects_data(data: dict):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    PROJECTS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def get_active_project() -> dict:
+    data = get_projects_data()
+    active_id = data.get("active_id")
+    for p in data.get("projects", []):
+        if p.get("id") == active_id:
+            return p
+    if data.get("projects"):
+        return data["projects"][0]
+    return {
+        "id": "default",
+        "name": "My Novel",
+        "path": DEFAULT_VAULT,
+    }
+
+
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/api/config")
 def get_config():
-    """Return initial app configuration and defaults."""
+    """Return initial app configuration and active project."""
+    active = get_active_project()
     return {
-        "default_vault": DEFAULT_VAULT,
+        "default_vault": active.get("path", DEFAULT_VAULT),
+        "active_project": active,
         "default_base_url": DEFAULT_BASE_URL,
+        "default_parent_dir": DEFAULT_PARENT_DIR,
     }
+
+
+@app.get("/api/projects")
+def list_projects():
+    """List all registered novel projects."""
+    data = get_projects_data()
+    active = get_active_project()
+    return {
+        "active_id": active.get("id"),
+        "active_project": active,
+        "default_parent_dir": DEFAULT_PARENT_DIR,
+        "projects": data.get("projects", []),
+    }
+
+
+@app.post("/api/projects/switch")
+def switch_project(req: ProjectSwitchRequest):
+    """Switch active working novel project."""
+    data = get_projects_data()
+    target = None
+    for p in data.get("projects", []):
+        if p.get("id") == req.project_id:
+            target = p
+            p["last_opened"] = datetime.now().isoformat()
+            break
+
+    if not target:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    data["active_id"] = req.project_id
+    save_projects_data(data)
+    return {"status": "ok", "active_project": target, "projects": data.get("projects", [])}
+
+
+@app.post("/api/projects/new")
+def create_new_project(req: NewProjectRequest):
+    """Create a new novel project, scaffold vault, and init git automatically."""
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+
+    # Determine vault directory
+    if req.vault_path and req.vault_path.strip():
+        vault_dir = Path(req.vault_path.strip()).expanduser().resolve()
+    else:
+        # Default into Nextcloud book directory
+        folder_slug = wa.slugify(clean_name)
+        vault_dir = (Path(DEFAULT_PARENT_DIR) / clean_name / "vault" / f"{folder_slug}_vault").resolve()
+
+    # 1. Scaffold vault structure
+    wa.init_vault(vault_dir)
+
+    # 2. If premise provided, save it to 00_Bible/premise.md
+    if req.premise and req.premise.strip():
+        premise_file = vault_dir / "00_Bible" / "premise.md"
+        premise_file.write_text(f"# Premise\n\n{req.premise.strip()}\n", encoding="utf-8")
+
+    # 3. Automatic Git Init
+    if req.init_git and not (vault_dir / ".git").exists():
+        try:
+            subprocess.run(["git", "init"], cwd=vault_dir, check=True, capture_output=True)
+            subprocess.run(["git", "add", "-A"], cwd=vault_dir, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", f"Initial vault for {clean_name}"], cwd=vault_dir, check=True, capture_output=True)
+        except Exception as e:
+            print(f"Warning: git init had issue: {e}")
+
+    # 4. Save to projects registry
+    data = get_projects_data()
+    project_id = wa.slugify(clean_name).lower()
+    # Check for uniqueness
+    existing_ids = {p.get("id") for p in data.get("projects", [])}
+    unique_id = project_id
+    counter = 1
+    while unique_id in existing_ids:
+        counter += 1
+        unique_id = f"{project_id}_{counter}"
+
+    new_proj = {
+        "id": unique_id,
+        "name": clean_name,
+        "path": str(vault_dir),
+        "created_at": datetime.now().isoformat(),
+        "last_opened": datetime.now().isoformat(),
+    }
+
+    data["projects"].append(new_proj)
+    data["active_id"] = unique_id
+    save_projects_data(data)
+
+    return {
+        "status": "ok",
+        "message": f"Project '{clean_name}' created and initialized at {vault_dir}",
+        "project": new_proj,
+        "projects": data["projects"],
+    }
+
+
+@app.delete("/api/projects/{project_id}")
+def remove_project(project_id: str):
+    """Remove project from registry (does not delete vault files on disk)."""
+    data = get_projects_data()
+    projects = [p for p in data.get("projects", []) if p.get("id") != project_id]
+    if len(projects) == len(data.get("projects", [])):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    data["projects"] = projects
+    if data.get("active_id") == project_id and projects:
+        data["active_id"] = projects[0]["id"]
+
+    save_projects_data(data)
+    return {"status": "ok", "projects": data["projects"]}
 
 
 @app.get("/api/models")

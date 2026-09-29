@@ -17,10 +17,26 @@
     </div>
 
     <div class="header-meta">
-      <!-- Vault Selector -->
-      <div class="vault-badge" id="vault-badge" title="Click to change vault">
-        <span>📁</span>
-        <span id="current-vault-label">Loading vault...</span>
+      <!-- Project & Vault Selector Dropdown -->
+      <div class="project-selector-wrapper">
+        <div class="vault-badge" id="project-badge" title="Click to switch or create novel projects">
+          <span>📚</span>
+          <strong id="current-project-name">Cold</strong>
+          <span style="color:var(--text-faint); margin:0 4px;">|</span>
+          <span id="current-vault-label" style="max-width:180px; overflow:hidden; text-overflow:ellipsis;">Loading...</span>
+          <span style="font-size:0.75rem; color:var(--text-faint); margin-left:4px;">▾</span>
+        </div>
+
+        <!-- Project Dropdown Menu -->
+        <div class="project-dropdown" id="project-dropdown" style="display:none;">
+          <div class="project-dropdown-header">
+            <span>Your Novel Projects</span>
+            <button class="btn-new-project-sm" id="btn-open-new-project-modal">✨ + New Project</button>
+          </div>
+          <div class="project-list" id="project-dropdown-list">
+            <!-- Dynamic project items loaded via JS -->
+          </div>
+        </div>
       </div>
 
       <!-- LM Studio Connection Status -->
@@ -69,9 +85,10 @@
           </div>
 
           <div style="margin-top: 1rem;">
-            <label style="margin-bottom:0.5rem; display:block;">Vault Actions</label>
+            <label style="margin-bottom:0.5rem; display:block;">Project & Vault Actions</label>
             <div style="display:flex; flex-direction:column; gap:0.5rem;">
-              <button class="btn-secondary" id="btn-reload-vault">🔄 Reload Vault Data</button>
+              <button class="btn-primary" id="btn-sidebar-new-project" style="margin:0; padding:0.55rem; font-size:0.85rem;">✨ + Start New Novel Project</button>
+              <button class="btn-secondary" id="btn-reload-vault">🔄 Reload Current Vault Data</button>
               <button class="btn-secondary" id="btn-scaffold-vault">🛠️ Scaffold / Re-init Vault</button>
             </div>
           </div>
@@ -251,6 +268,48 @@
       </section>
 
     </main>
+  </div>
+
+  <!-- Modal: Create New Novel Project -->
+  <div class="modal-backdrop" id="modal-new-project" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>✨ Start New Novel Project</h3>
+        <button class="modal-close-btn" id="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="new-proj-name">Novel / Project Title *</label>
+          <input type="text" id="new-proj-name" placeholder="e.g. Shadows of the Valley" autofocus>
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="new-proj-vault-path">Custom Vault Path (Optional)</label>
+          <input type="text" id="new-proj-vault-path" placeholder="Leave blank for automatic folder in Nextcloud\book">
+          <span style="font-size:0.75rem; color:var(--text-faint); margin-top:0.25rem;">
+            Default: C:\Users\FSGee\Nextcloud\book\&lt;NovelName&gt;\vault
+          </span>
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="new-proj-premise">Premise / Logline (Optional)</label>
+          <textarea id="new-proj-premise" style="height:65px;" placeholder="Write a short premise to seed your 00_Bible/premise.md..."></textarea>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
+          <input type="checkbox" id="new-proj-git" checked>
+          <label for="new-proj-git" style="text-transform:none; font-weight:normal; font-size:0.82rem; cursor:pointer; color:var(--text-main);">
+            Initialize Git repository automatically (revertible history & diffs)
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel-modal">Cancel</button>
+        <button class="btn-primary" id="btn-submit-new-project" style="width:auto; margin:0; padding:0.5rem 1.25rem;">
+          🚀 Create Project & Vault
+        </button>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

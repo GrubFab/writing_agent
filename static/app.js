@@ -1,22 +1,12 @@
 // Writing Agent Frontend Application
 let currentVault = "C:\\Users\\FSGee\\Nextcloud\\book\\Cold\\vault\\MyNovelVault";
+let currentProject = { id: "cold", name: "Cold", path: currentVault };
 let currentBaseUrl = "http://localhost:1234/v1";
 let isProcessing = false;
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Load initial config
-  try {
-    const confRes = await fetch("/api/config");
-    if (confRes.ok) {
-      const conf = await confRes.json();
-      if (conf.default_vault) currentVault = conf.default_vault;
-      if (conf.default_base_url) currentBaseUrl = conf.default_base_url;
-    }
-  } catch (e) {
-    console.warn("Could not load config, using defaults:", e);
-  }
-
-  updateVaultDisplay();
+  // 1. Load initial projects & config
+  await loadProjects();
   checkLmStudioModels();
   loadVaultData();
 
@@ -24,13 +14,90 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// UI & State Initializers
+// Projects Management
 // ---------------------------------------------------------------------------
 
+async function loadProjects() {
+  try {
+    const res = await fetch("/api/projects");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.active_project) {
+        currentProject = data.active_project;
+        currentVault = data.active_project.path;
+      }
+      renderProjectsDropdown(data.projects || [], data.active_id);
+    }
+  } catch (e) {
+    console.warn("Could not load projects:", e);
+  }
+  updateVaultDisplay();
+}
+
+function renderProjectsDropdown(projects, activeId) {
+  const listEl = document.getElementById("project-dropdown-list");
+  if (!listEl) return;
+  listEl.innerHTML = "";
+
+  projects.forEach(p => {
+    const item = document.createElement("div");
+    item.className = `project-item ${p.id === activeId ? 'active' : ''}`;
+    item.innerHTML = `
+      <div class="project-item-info">
+        <span class="project-item-title">${escapeHtml(p.name)}</span>
+        <span class="project-item-path" title="${escapeHtml(p.path)}">${escapeHtml(p.path)}</span>
+      </div>
+      ${p.id === activeId ? '<span style="color:var(--accent); font-weight:bold;">✓</span>' : ''}
+    `;
+    item.addEventListener("click", () => switchProject(p.id));
+    listEl.appendChild(item);
+  });
+}
+
+async function switchProject(projectId) {
+  try {
+    const res = await fetch("/api/projects/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      currentProject = data.active_project;
+      currentVault = data.active_project.path;
+      updateVaultDisplay();
+      renderProjectsDropdown(data.projects, data.active_project.id);
+      closeProjectDropdown();
+      loadVaultData();
+    }
+  } catch (err) {
+    alert("Failed to switch project: " + err.message);
+  }
+}
+
 function updateVaultDisplay() {
-  const badge = document.getElementById("current-vault-label");
-  if (badge) {
-    badge.textContent = currentVault;
+  const projNameEl = document.getElementById("current-project-name");
+  const vaultLabelEl = document.getElementById("current-vault-label");
+
+  if (projNameEl && currentProject) {
+    projNameEl.textContent = currentProject.name || "Project";
+  }
+  if (vaultLabelEl) {
+    vaultLabelEl.textContent = currentVault;
+    vaultLabelEl.title = currentVault;
+  }
+}
+
+function closeProjectDropdown() {
+  const dd = document.getElementById("project-dropdown");
+  if (dd) dd.style.display = "none";
+}
+
+function toggleProjectDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById("project-dropdown");
+  if (dd) {
+    dd.style.display = dd.style.display === "none" ? "flex" : "none";
   }
 }
 
@@ -198,15 +265,46 @@ async function loadVaultData() {
 // ---------------------------------------------------------------------------
 
 function setupEventListeners() {
-  // Vault switch prompt
-  document.getElementById("vault-badge").addEventListener("click", () => {
-    const newPath = prompt("Enter full path to your Obsidian vault:", currentVault);
-    if (newPath && newPath.trim()) {
-      currentVault = newPath.trim();
-      updateVaultDisplay();
-      loadVaultData();
+  // Project selector dropdown toggle
+  const projBadge = document.getElementById("project-badge");
+  if (projBadge) {
+    projBadge.addEventListener("click", toggleProjectDropdown);
+  }
+
+  // Close dropdown on click outside
+  document.addEventListener("click", (e) => {
+    const wrapper = document.querySelector(".project-selector-wrapper");
+    if (wrapper && !wrapper.contains(e.target)) {
+      closeProjectDropdown();
     }
   });
+
+  // Open New Project Modal
+  const btnOpenModal = document.getElementById("btn-open-new-project-modal");
+  if (btnOpenModal) {
+    btnOpenModal.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeProjectDropdown();
+      openNewProjectModal();
+    });
+  }
+
+  const btnSidebarNew = document.getElementById("btn-sidebar-new-project");
+  if (btnSidebarNew) {
+    btnSidebarNew.addEventListener("click", openNewProjectModal);
+  }
+
+  // Close Modal buttons
+  const btnCloseModal = document.getElementById("btn-close-modal");
+  const btnCancelModal = document.getElementById("btn-cancel-modal");
+  if (btnCloseModal) btnCloseModal.addEventListener("click", closeNewProjectModal);
+  if (btnCancelModal) btnCancelModal.addEventListener("click", closeNewProjectModal);
+
+  // Submit New Project
+  const btnSubmitNew = document.getElementById("btn-submit-new-project");
+  if (btnSubmitNew) {
+    btnSubmitNew.addEventListener("click", submitNewProject);
+  }
 
   // Status badge click to refresh
   document.getElementById("status-badge").addEventListener("click", checkLmStudioModels);
@@ -698,4 +796,75 @@ function renderEditorialSuggestions(ed, container) {
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Project Creation Modal Handlers
+// ---------------------------------------------------------------------------
+
+function openNewProjectModal() {
+  const modal = document.getElementById("modal-new-project");
+  if (modal) {
+    modal.style.display = "flex";
+    document.getElementById("new-proj-name").value = "";
+    document.getElementById("new-proj-vault-path").value = "";
+    document.getElementById("new-proj-premise").value = "";
+    document.getElementById("new-proj-name").focus();
+  }
+}
+
+function closeNewProjectModal() {
+  const modal = document.getElementById("modal-new-project");
+  if (modal) modal.style.display = "none";
+}
+
+async function submitNewProject() {
+  const nameInput = document.getElementById("new-proj-name");
+  const pathInput = document.getElementById("new-proj-vault-path");
+  const premiseInput = document.getElementById("new-proj-premise");
+  const gitInput = document.getElementById("new-proj-git");
+
+  const name = nameInput.value.trim();
+  if (!name) {
+    alert("Please provide a novel/project title.");
+    nameInput.focus();
+    return;
+  }
+
+  const btnSubmit = document.getElementById("btn-submit-new-project");
+  btnSubmit.disabled = true;
+  btnSubmit.textContent = "Creating Vault & Git...";
+
+  try {
+    const res = await fetch("/api/projects/new", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name,
+        vault_path: pathInput.value.trim() || null,
+        premise: premiseInput.value.trim() || null,
+        init_git: gitInput.checked,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Failed to create project");
+    }
+
+    const data = await res.json();
+    currentProject = data.project;
+    currentVault = data.project.path;
+    closeNewProjectModal();
+    updateVaultDisplay();
+    renderProjectsDropdown(data.projects, data.project.id);
+    loadVaultData();
+    alert(`🎉 Novel project "${name}" created!\n\nVault initialized at:\n${currentVault}`);
+  } catch (err) {
+    alert("Could not create project: " + err.message);
+  } finally {
+    btnSubmit.disabled = false;
+    btnSubmit.textContent = "🚀 Create Project & Vault";
+  }
+}
+
 
