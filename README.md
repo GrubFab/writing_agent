@@ -10,8 +10,10 @@ threads, and a per-chapter note.
 ## 1. Setup
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
+
+This installs `writing-agent` (and `writing_agent`) as a standard command available in your terminal.
 
 In LM Studio:
 - Load a model with a reasonably large context window (8k+ recommended, since
@@ -22,8 +24,8 @@ In LM Studio:
 ## 2. Create your vault
 
 ```bash
-python writing_agent.py init ~/MyNovelVault
-cd ~/MyNovelVault
+writing-agent init C:\Users\FSGee\Downloads\MyNovelVault
+cd C:\Users\FSGee\Downloads\MyNovelVault
 git init && git add -A && git commit -m "Initial vault"
 ```
 
@@ -48,7 +50,7 @@ black box. If you skip `git init`, it still works, just without that safety net.
 ## 3. Process a chapter
 
 ```bash
-python writing_agent.py process ~/MyNovelVault ./drafts/chapter12.txt \
+writing-agent process C:\Users\FSGee\Downloads\MyNovelVault ./drafts/chapter12.txt \
   --chapter 12 --title "The Long Road" --model your-model-name-here
 ```
 
