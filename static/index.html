@@ -44,6 +44,12 @@
         <span class="dot"></span>
         <span id="status-text">LM Studio Offline</span>
       </div>
+
+      <!-- App Shutdown / Close Button -->
+      <button class="btn-quit" id="btn-quit-app" title="Stop Writing Agent server and close application">
+        <span>🛑</span>
+        <span>Quit App</span>
+      </button>
     </div>
   </header>
 
@@ -55,10 +61,12 @@
       <!-- Tabs -->
       <div class="sidebar-tabs">
         <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+        <button class="tab-btn" data-tab="tab-finished">Finished</button>
         <button class="tab-btn" data-tab="tab-characters">Characters</button>
         <button class="tab-btn" data-tab="tab-timeline">Timeline</button>
         <button class="tab-btn" data-tab="tab-threads">Threads</button>
         <button class="tab-btn" data-tab="tab-bible">Bible</button>
+        <button class="tab-btn" data-tab="tab-memory">Memory</button>
       </div>
 
       <!-- Tab Content Area -->
@@ -68,7 +76,11 @@
           <div class="vault-stat-grid">
             <div class="stat-card">
               <div class="stat-num" id="stat-chapters">0</div>
-              <div class="stat-label">Chapters</div>
+              <div class="stat-label">In-Progress</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-num" id="stat-finished">0</div>
+              <div class="stat-label">Finished</div>
             </div>
             <div class="stat-card">
               <div class="stat-num" id="stat-characters">0</div>
@@ -101,6 +113,14 @@
           </div>
         </div>
 
+        <!-- Finished Chapters Tab -->
+        <div id="tab-finished" class="tab-pane" style="display:none;">
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;">
+            📁 Dedicated dossier of finalized, completed novel chapters.
+          </div>
+          <div id="finished-chapters-list" class="explorer-list"></div>
+        </div>
+
         <!-- Characters Tab -->
         <div id="tab-characters" class="tab-pane" style="display:none;">
           <div id="characters-list" class="explorer-list"></div>
@@ -119,6 +139,20 @@
         <!-- Bible Tab -->
         <div id="tab-bible" class="tab-pane" style="display:none;">
           <div id="bible-list" class="explorer-list"></div>
+        </div>
+
+        <!-- Editorial Memory & Learned Skills Tab -->
+        <div id="tab-memory" class="tab-pane" style="display:none;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+            <div style="font-size:0.8rem; color:var(--text-muted);">
+              🧠 Continuous Learning & Skills
+            </div>
+            <button class="btn-sm-text" id="btn-save-editorial-memory">💾 Save Edits</button>
+          </div>
+          <textarea id="editorial-memory-editor" class="memory-editor-textarea" placeholder="Editorial memory and learned rules will load here..."></textarea>
+          <div style="font-size:0.72rem; color:var(--text-faint); margin-top:0.35rem;">
+            Automatically loaded into the model's context to guide all future chapters.
+          </div>
         </div>
       </div>
     </aside>
@@ -353,6 +387,44 @@
 
         <div id="res-threads" class="res-pane" style="display:none;">
           <div id="res-threads-list" class="explorer-list"></div>
+        </div>
+
+        <!-- ✍️ Iterative Polish & Rectification Workbench -->
+        <div class="workbench-panel" id="workbench-panel">
+          <div class="workbench-header">
+            <div class="workbench-title">
+              <span>✍️</span>
+              <span>Iterative Polish Workbench</span>
+              <span class="workbench-iteration-badge" id="workbench-iteration-badge">Pass #1</span>
+            </div>
+            <div class="workbench-actions">
+              <button class="btn-sm-text" id="btn-workbench-clear" title="Clear workbench text">Clear</button>
+              <button class="btn-sm-text" id="btn-workbench-sync-main" title="Copy text back up to main draft editor">⬆ Sync to Main Draft</button>
+            </div>
+          </div>
+          <p class="workbench-desc">
+            Rectify text extracts, paste revised dialogue, or drop your updated chapter below. The agent will re-analyze your revisions and offer tailored propositions in a continuous refinement loop until you are completely satisfied before vault upload.
+          </p>
+
+          <div class="workbench-editor-container">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+              <label for="workbench-draft-text" class="workbench-label">Revised Manuscript / Rectified Extracts</label>
+              <span id="workbench-word-count" style="font-size:0.75rem; color:var(--text-faint);">0 words | 0 characters</span>
+            </div>
+            <textarea id="workbench-draft-text" class="workbench-textarea" placeholder="Paste your rectified text extracts or revised chapter draft here..."></textarea>
+          </div>
+
+          <div class="workbench-notes-container">
+            <label for="workbench-revision-notes" class="workbench-label">Author Revision Directives & Notes (Optional)</label>
+            <input type="text" id="workbench-revision-notes" class="workbench-input" placeholder="e.g. 'Rewrote Elena\'s dialogue using the Cibliste proposition; tightened scene 2.'">
+          </div>
+
+          <div class="workbench-buttons-row">
+            <button class="btn-primary btn-reanalyze" id="btn-workbench-reanalyze">
+              <span>🔄</span>
+              <span id="btn-workbench-reanalyze-text">Re-analyze Rectified Draft (Next Polish Pass)</span>
+            </button>
+          </div>
         </div>
       </section>
 

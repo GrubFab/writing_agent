@@ -76,6 +76,8 @@ class ProcessRequest(BaseModel):
     language: str = "en"
     authors: Optional[list[str]] = None
     author_clarifications: Optional[list[dict]] = None
+    iteration: int = 1
+    revision_notes: Optional[str] = None
 
 
 class CustomAuthorRequest(BaseModel):
@@ -97,6 +99,13 @@ class ApplyRequest(BaseModel):
     title: str
     status: str = "draft"
     data: dict
+    chapter_text: Optional[str] = None
+    iteration: int = 1
+
+
+class EditorialMemoryRequest(BaseModel):
+    vault_path: str
+    content: str
 
 
 class ProjectSwitchRequest(BaseModel):
@@ -201,6 +210,19 @@ def get_active_project() -> dict:
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
+
+@app.post("/api/shutdown")
+def shutdown_app():
+    """Cleanly stops the local Uvicorn server and closes the application."""
+    def _delayed_exit():
+        import time
+        time.sleep(0.5)
+        os._exit(0)
+
+    import threading
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+    return {"status": "ok", "message": "Writing Agent application is shutting down."}
+
 
 @app.get("/api/config")
 def get_config():
@@ -491,6 +513,27 @@ def inspect_vault(vault_path: str = DEFAULT_VAULT):
                 "content": f.read_text(encoding="utf-8"),
             })
 
+    # Finished Chapters
+    fin_dir = v_path / "Finished_Chapters"
+    finished_chapters = []
+    if fin_dir.exists():
+        for f in sorted(fin_dir.glob("*.md")):
+            if f.name.lower() == "readme.md":
+                continue
+            text = f.read_text(encoding="utf-8")
+            wc_match = re.search(r"word_count:\s*(\d+)", text)
+            wc = int(wc_match.group(1)) if wc_match else len(text.split())
+            finished_chapters.append({
+                "name": f.name,
+                "title": f.stem,
+                "content": text,
+                "word_count": wc,
+            })
+
+    # Editorial Memory
+    ed_mem_file = v_path / "00_Bible" / "editorial_memory.md"
+    ed_mem_text = ed_mem_file.read_text(encoding="utf-8") if ed_mem_file.exists() else ""
+
     # Logs
     log_dir = v_path / "Log"
     logs = []
@@ -511,14 +554,27 @@ def inspect_vault(vault_path: str = DEFAULT_VAULT):
             "timeline_count": len(timeline_rows),
             "threads_count": len(threads_rows),
             "chapters_count": len(chapters),
+            "finished_count": len(finished_chapters),
         },
         "bible": bible_files,
         "characters": characters,
         "timeline": timeline_rows,
         "threads": threads_rows,
         "chapters": chapters,
+        "finished_chapters": finished_chapters,
+        "editorial_memory": ed_mem_text,
         "recent_logs": logs,
     }
+
+
+@app.post("/api/vault/editorial-memory")
+def save_editorial_memory(req: EditorialMemoryRequest):
+    """Save manual edits to 00_Bible/editorial_memory.md."""
+    v_path = Path(req.vault_path).expanduser().resolve()
+    ed_mem = v_path / "00_Bible" / "editorial_memory.md"
+    ed_mem.parent.mkdir(parents=True, exist_ok=True)
+    ed_mem.write_text(req.content, encoding="utf-8")
+    return {"status": "ok", "message": "Editorial memory and learned skills updated."}
 
 
 @app.post("/api/vault/init")
@@ -559,6 +615,8 @@ def apply_chapter_to_vault(req: ApplyRequest):
             title=req.title,
             status=req.status,
             data=req.data,
+            chapter_text=req.chapter_text,
+            iteration=req.iteration,
         )
         return {
             "status": "ok",
@@ -614,10 +672,11 @@ async def process_chapter_stream(req: ProcessRequest):
         # 3. Model Invocation
         style_info = f" (style: {len(req.authors or [])} authors, lang: {req.language})" if (req.authors or req.language != 'en') else ""
         clarif_info = f" [incorporating {len(req.author_clarifications)} author clarification(s)]" if req.author_clarifications else ""
+        iter_info = f" (Pass #{req.iteration})" if req.iteration > 1 else ""
         yield json.dumps({
             "step": "llm_start",
             "progress": 55,
-            "message": f"Sending context and draft to LM Studio model '{req.model}' (max tokens: {req.max_tokens}){style_info}{clarif_info}...",
+            "message": f"Sending context and draft to LM Studio model '{req.model}' (max tokens: {req.max_tokens}){style_info}{clarif_info}{iter_info}...",
         })
         await asyncio.sleep(0.1)
 
@@ -634,6 +693,8 @@ async def process_chapter_stream(req: ProcessRequest):
                 req.language or "en",
                 req.authors,
                 req.author_clarifications,
+                req.iteration,
+                req.revision_notes,
             )
         except Exception as e:
             yield json.dumps({"step": "error", "error": f"Model inference failed: {str(e)}"})
@@ -652,16 +713,19 @@ async def process_chapter_stream(req: ProcessRequest):
         await asyncio.sleep(0.1)
 
         # 4. Ready for author review (vault files remain untouched until author approves)
+        iter_suffix = f" (Pass #{req.iteration})" if req.iteration > 1 else ""
         yield json.dumps({
             "step": "ready_for_review",
             "progress": 100,
-            "message": f"Draft analysis complete for Chapter {req.chapter_num}! Review remarks below and approve when ready.",
+            "message": f"Draft analysis complete for Chapter {req.chapter_num}{iter_suffix}! Review remarks below and approve when ready.",
             "already_exists": already_exists,
             "staged_data": {
                 "vault_path": str(v_path),
                 "chapter_num": req.chapter_num,
                 "title": req.title,
                 "status": req.status or "draft",
+                "chapter_text": chapter_text,
+                "iteration": req.iteration,
                 "data": data,
             },
             "result": {
@@ -672,6 +736,8 @@ async def process_chapter_stream(req: ProcessRequest):
                 "threads": data.get("threads", []),
                 "continuity_flags": data.get("continuity_flags", []),
                 "editorial_suggestions": data.get("editorial_suggestions", {}),
+                "iteration": req.iteration,
+                "draft_text": chapter_text,
             },
         })
 

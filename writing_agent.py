@@ -108,6 +108,13 @@ def get_system_prompt(language: str = "en", author_ids: list = None) -> str:
         parts.append(f"\n{lang_section}")
 
     parts.append("""
+CONTINUOUS LEARNING & EDITORIAL MEMORY:
+You will find an 'EDITORIAL MEMORY & LEARNED CRAFT SKILLS' section in your context, reflecting author preferences, character voice nuances, and canonical rulings accumulated from previously processed chapters.
+- Strictly respect and build upon these learned lessons.
+- Ensure recurring characters sound consistent with their established voice profiles.
+- Never flag previously clarified facts or canon rulings as continuity contradictions.""")
+
+    parts.append("""
 REASONING & CONTEXT INSTRUCTION:
 You have a generous context window (+40k tokens). Keep your internal reasoning / chain-of-thought focused on analyzing the story draft, character arcs, and authentic spoken dialogue. Ensure you output the complete, unabbreviated JSON object covering all requested fields without cutting off.""")
 
@@ -121,13 +128,15 @@ SYSTEM_PROMPT = get_system_prompt()
 # Vault scaffolding
 # ---------------------------------------------------------------------------
 
-FOLDERS = ["00_Bible", "Characters", "Chapters", "Timeline", "Threads", "Log"]
+FOLDERS = ["00_Bible", "Characters", "Chapters", "Finished_Chapters", "Timeline", "Threads", "Log"]
 
 STARTER_FILES = {
     "00_Bible/premise.md": "# Premise\n\n(Write your one-paragraph premise here.)\n",
     "00_Bible/themes.md": "# Themes\n\n- \n",
     "00_Bible/style_guide.md": "# Style guide\n\n## Narrative Stance\n- POV: Third person limited\n- Tense: Past\n- Tone: Immersive, grounded\n\n## Linguistic Charter (Cibliste vs Sourcier)\n- **Register & Voice**: Idiomatique, oralisé, langue vivante et incarnée (éviter les tournures artificielles ou calquées).\n- **Dialogues**: Rythme parlé naturel, syntaxe souple, sans lourdeurs livresques.\n- **Régionalismes / Terroir**: Vocabulaire ancré, expressions imagées locales si pertinent.\n- **Pièges à éviter**: Anglicismes masqués, tics de traduction (répétitions de soupirs, hochements de tête, fioritures d'exposition).\n",
     "00_Bible/world_rules.md": "# World rules\n\n- \n",
+    "00_Bible/editorial_memory.md": "# Editorial Memory & Learned Skills\n\n## Author Preferences & Pacing\n- Maintain procedural economy and realistic pacing (Connelly/Clancy benchmark).\n- Prioritize functional, authentic spoken dialogue over exposition.\n\n## Character Voice Profiles\n- (Learned speech habits, vocabulary, and behavioral traits accumulate here as chapters are processed.)\n\n## Established Lore & Canon Decisions\n- (Author continuity clarifications and established facts are recorded here so the agent never flags them as contradictions again.)\n",
+    "Finished_Chapters/README.md": "# Finished Chapters\n\nThis dossier contains final, completed chapters of the novel.\n",
     "Timeline/timeline.md": "# Timeline\n\n| Order / Date | Event | Characters | Chapter |\n|---|---|---|---|\n",
     "Threads/threads.md": "# Threads\n\n| Thread | Status | Last update | Chapter |\n|---|---|---|---|\n",
 }
@@ -155,11 +164,18 @@ def gather_context(vault_path: Path, max_chars_per_section=25000) -> str:
     bible_dir = vault_path / "00_Bible"
     if bible_dir.exists():
         bible_files = sorted(bible_dir.glob("*.md"))
-        if bible_files:
+        standard_bible = [f for f in bible_files if f.name.lower() != "editorial_memory.md"]
+        if standard_bible:
             bible_text = "\n\n".join(
-                f"## {f.stem}\n{f.read_text(encoding='utf-8').strip()}" for f in bible_files
+                f"## {f.stem}\n{f.read_text(encoding='utf-8').strip()}" for f in standard_bible
             )
-            parts.append("### BIBLE\n" + bible_text[:max_chars_per_section])
+            parts.append("### BIBLE (Premise, Themes, World Rules, Style Guide)\n" + bible_text[:max_chars_per_section])
+
+        ed_mem = bible_dir / "editorial_memory.md"
+        if ed_mem.exists():
+            mem_text = ed_mem.read_text(encoding="utf-8").strip()
+            if mem_text:
+                parts.append("### EDITORIAL MEMORY & LEARNED CRAFT SKILLS (Accumulated from previous chapters & author rulings)\n" + mem_text[:max_chars_per_section])
 
     chars_dir = vault_path / "Characters"
     if chars_dir.exists():
@@ -326,6 +342,8 @@ def call_llm(
     language: str = "en",
     author_ids: list = None,
     author_clarifications: list = None,
+    iteration: int = 1,
+    revision_notes: str = None,
 ) -> dict:
     sys_prompt = get_system_prompt(language=language, author_ids=author_ids)
 
@@ -351,7 +369,19 @@ def call_llm(
         )
         user_content_parts.append("\n".join(clarif_lines))
 
-    user_content_parts.append(f"---\n\nNEW CHAPTER DRAFT:\n{chapter_text}")
+    if iteration > 1 or revision_notes:
+        iter_lines = [
+            f"ITERATIVE POLISH & RECTIFICATION PASS (Iteration #{iteration}):",
+            "The author has submitted a rectified / revised draft based on previous editorial propositions.",
+        ]
+        if revision_notes and revision_notes.strip():
+            iter_lines.append(f"Author's Revision Notes & Directives:\n{revision_notes.strip()}")
+        iter_lines.append(
+            "Analyze how the revisions improved the draft, verify whether previous continuity issues or stilted phrasing were resolved, and offer fresh, focused propositions on the remaining text."
+        )
+        user_content_parts.append("\n".join(iter_lines))
+
+    user_content_parts.append(f"---\n\nCHAPTER DRAFT (Pass #{iteration}):\n{chapter_text}")
     user_content = "\n\n".join(user_content_parts)
 
     payload = {
@@ -658,8 +688,139 @@ def git_commit(vault_path: Path, message: str):
             print(f"Git commit skipped/failed: {out}")
 
 
-def apply_chapter_data(vault_path: Path, chapter_num: int, title: str, status: str, data: dict) -> dict:
-    """Apply approved chapter data to the vault and commit to git."""
+def write_finished_chapter(
+    vault_path: Path,
+    chapter_num: int,
+    title: str,
+    pov: str,
+    summary: str,
+    chapter_text: str,
+    iteration: int = 1,
+) -> Path:
+    """Writes a clean, finalized manuscript and dossier to Finished_Chapters/."""
+    fin_dir = vault_path / "Finished_Chapters"
+    fin_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"Chapter_{int(chapter_num):02d} - {title.strip()}.md"
+    clean_filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+    path = fin_dir / clean_filename
+
+    words = len(chapter_text.split()) if chapter_text else 0
+    chars = len(chapter_text) if chapter_text else 0
+    today = datetime.now().date().isoformat()
+
+    content = f"""---
+chapter: {chapter_num}
+title: "{title}"
+pov: "{pov}"
+status: "final"
+word_count: {words}
+character_count: {chars}
+date_completed: {today}
+iteration_passes: {iteration}
+---
+
+# Chapter {chapter_num}: {title}
+
+**POV**: {pov} | **Word Count**: {words:,} | **Completed**: {today} | **Polish Passes**: {iteration}
+
+## Synopsis
+{summary}
+
+---
+
+## Manuscript
+
+{chapter_text.strip()}
+"""
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def update_editorial_memory(vault_path: Path, chapter_num: int, title: str, data: dict):
+    """Accumulates learned author preferences, character voice nuances, and canonical decisions into 00_Bible/editorial_memory.md."""
+    bible_dir = vault_path / "00_Bible"
+    bible_dir.mkdir(parents=True, exist_ok=True)
+    path = bible_dir / "editorial_memory.md"
+
+    if not path.exists():
+        content = STARTER_FILES.get("00_Bible/editorial_memory.md", "# Editorial Memory & Learned Skills\n")
+    else:
+        content = path.read_text(encoding="utf-8")
+
+    today = datetime.now().date().isoformat()
+
+    # 1. Author continuity clarifications & canon decisions
+    clarifs = data.get("continuity_clarifications") or []
+    canon_lines = []
+    for c in clarifs:
+        if isinstance(c, dict):
+            flag = c.get("flag", "").strip()
+            ans = c.get("clarification", "").strip()
+            res = c.get("resolution", "Clarified")
+            if ans:
+                canon_lines.append(f"- **Ch.{chapter_num} [{res}]**: {flag} -> *Author Ruling*: {ans}")
+            elif res != "Dismiss":
+                canon_lines.append(f"- **Ch.{chapter_num} [{res}]**: {flag}")
+        elif isinstance(c, str) and c.strip():
+            canon_lines.append(f"- **Ch.{chapter_num}**: {c.strip()}")
+
+    # 2. Character voice profiles from dialogue coaching
+    ed = data.get("editorial_suggestions") or {}
+    voice_lines = []
+    if isinstance(ed, dict):
+        dialogue = ed.get("dialogue_coaching", [])
+        for d in dialogue:
+            char = d.get("character", "").strip()
+            prop = d.get("proposition", "").strip()
+            crit = d.get("critique", "").strip()
+            if char and (crit or prop):
+                voice_lines.append(f"- **{char} (Ch.{chapter_num})**: Lesson: {crit}. Preferred idiom: \"{prop}\"")
+
+    # 3. Pacing / Style takeaways
+    style_assessment = ed.get("style_assessment", "").strip() if isinstance(ed, dict) else ""
+
+    # Append to sections in editorial_memory.md
+    if canon_lines:
+        if "## Established Lore & Canon Decisions" in content:
+            content = content.replace(
+                "## Established Lore & Canon Decisions",
+                "## Established Lore & Canon Decisions\n" + "\n".join(canon_lines)
+            )
+        else:
+            content += "\n\n## Established Lore & Canon Decisions\n" + "\n".join(canon_lines)
+
+    if voice_lines:
+        if "## Character Voice Profiles" in content:
+            content = content.replace(
+                "## Character Voice Profiles",
+                "## Character Voice Profiles\n" + "\n".join(voice_lines)
+            )
+        else:
+            content += "\n\n## Character Voice Profiles\n" + "\n".join(voice_lines)
+
+    if style_assessment:
+        pacing_entry = f"- **Ch.{chapter_num} ({today})**: {style_assessment}"
+        if "## Author Preferences & Pacing" in content:
+            content = content.replace(
+                "## Author Preferences & Pacing",
+                "## Author Preferences & Pacing\n" + pacing_entry
+            )
+        else:
+            content += "\n\n## Author Preferences & Pacing\n" + pacing_entry
+
+    path.write_text(content, encoding="utf-8")
+
+
+def apply_chapter_data(
+    vault_path: Path,
+    chapter_num: int,
+    title: str,
+    status: str,
+    data: dict,
+    chapter_text: str = None,
+    iteration: int = 1,
+) -> dict:
+    """Apply approved chapter data to the vault, save finished manuscript if final, update editorial memory, and commit to git."""
     v_path = Path(vault_path).expanduser().resolve()
     if not v_path.exists():
         raise ValueError(f"Vault path does not exist: {v_path}")
@@ -695,17 +856,36 @@ def apply_chapter_data(vault_path: Path, chapter_num: int, title: str, status: s
     if threads:
         update_threads(v_path, threads, chapter_num)
 
-    # 5. Append log
+    # 5. If status is final and chapter manuscript text is provided, write to Finished_Chapters
+    finished_path = None
+    if status and status.lower() == "final" and chapter_text:
+        finished_path = write_finished_chapter(
+            v_path,
+            chapter_num=chapter_num,
+            title=title,
+            pov=data.get("pov_character", "unclear"),
+            summary=data.get("summary", ""),
+            chapter_text=chapter_text,
+            iteration=iteration,
+        )
+
+    # 6. Accumulate continuous learning into 00_Bible/editorial_memory.md
+    update_editorial_memory(v_path, chapter_num, title, data)
+
+    # 7. Append log
     append_log(v_path, chapter_num, title, data)
 
-    # 6. Commit to Git
+    # 8. Commit to Git
     commit_msg = f"Chapter {chapter_num}: {title}" + (" (updated)" if already_exists else "")
+    if finished_path:
+        commit_msg += " [Finished Chapter]"
     git_commit(v_path, commit_msg)
 
     return {
         "status": "ok",
         "already_exists": already_exists,
         "chapter_note": str(ch_path),
+        "finished_chapter": str(finished_path) if finished_path else None,
         "characters_updated": chars_updated,
         "timeline_events_count": len(events),
         "threads_count": len(threads),
@@ -809,12 +989,15 @@ def process_chapter(args):
             return
 
     status = args.status or "draft"
-    res = apply_chapter_data(vault_path, args.chapter, args.title, status, data)
+    res = apply_chapter_data(vault_path, args.chapter, args.title, status, data, chapter_text=chapter_text)
 
     print(f"\n✓ Chapter {args.chapter} successfully applied to vault and committed to Git.")
+    if res.get("finished_chapter"):
+        print(f"✓ Finalized manuscript dossier saved to Finished_Chapters/: {res['finished_chapter']}")
     print(f"- {len(res['characters_updated'])} character dossier(s) updated in-place")
     print(f"- {res['timeline_events_count']} timeline event(s) merged in-place")
     print(f"- {res['threads_count']} plot thread(s) updated")
+    print("- Editorial memory & learned craft skills updated in 00_Bible/editorial_memory.md")
 
 
 def main():
