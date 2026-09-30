@@ -90,8 +90,8 @@ Only include characters/threads that are actually relevant to THIS chapter.
 Do not invent facts not present in the chapter text or the provided context.
 If nothing applies to a list, return an empty list.
 
-REASONING & TOKEN BUDGET INSTRUCTION:
-If you are a reasoning or thinking model, keep your internal reasoning / chain-of-thought concise (under 250 words). Allocate your token budget to generating the complete, unabbreviated JSON object without running out of tokens."""
+REASONING & CONTEXT INSTRUCTION:
+You have a generous context window (+40k tokens). Keep your internal reasoning / chain-of-thought focused on analyzing the story draft, character arcs, and authentic spoken dialogue. Ensure you output the complete, unabbreviated JSON object covering all requested fields without cutting off."""
 
 
 # ---------------------------------------------------------------------------
@@ -123,36 +123,44 @@ def init_vault(vault_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Context gathering (kept compact — this is not a RAG system, just summaries)
+# Context gathering (optimized for +40k context windows)
 # ---------------------------------------------------------------------------
 
-def gather_context(vault_path: Path, max_chars_per_section=4000) -> str:
+def gather_context(vault_path: Path, max_chars_per_section=25000) -> str:
     parts = []
 
     bible_dir = vault_path / "00_Bible"
     if bible_dir.exists():
-        bible_text = "\n\n".join(
-            f"## {f.stem}\n{f.read_text(encoding='utf-8')}" for f in sorted(bible_dir.glob("*.md"))
-        )
-        parts.append("### BIBLE\n" + bible_text[:max_chars_per_section])
+        bible_files = sorted(bible_dir.glob("*.md"))
+        if bible_files:
+            bible_text = "\n\n".join(
+                f"## {f.stem}\n{f.read_text(encoding='utf-8').strip()}" for f in bible_files
+            )
+            parts.append("### BIBLE\n" + bible_text[:max_chars_per_section])
 
     chars_dir = vault_path / "Characters"
     if chars_dir.exists():
         char_summaries = []
         for f in sorted(chars_dir.glob("*.md")):
             text = f.read_text(encoding="utf-8")
-            overview = text.split(AUTO_MARK_START)[0]
-            char_summaries.append(f"- {f.stem}: {overview.strip()[:300]}")
+            overview = text.split(AUTO_MARK_START)[0].strip() if AUTO_MARK_START in text else text.strip()
+            recent_update = ""
+            if AUTO_MARK_START in text and AUTO_MARK_END in text:
+                auto_block = text.split(AUTO_MARK_START, 1)[1].split(AUTO_MARK_END, 1)[0].strip()
+                entries = re.findall(r"(### Chapter \d+[^\n]*\n[\s\S]*?)(?=(?:\n### Chapter |\Z))", auto_block)
+                if entries:
+                    recent_update = " | Latest: " + entries[-1].strip().replace("\n", " ")
+            char_summaries.append(f"- **{f.stem}**: {overview[:800]}{recent_update[:400]}")
         if char_summaries:
-            parts.append("### KNOWN CHARACTERS (name: short overview)\n" + "\n".join(char_summaries)[:max_chars_per_section])
+            parts.append("### KNOWN CHARACTERS (dossiers & status)\n" + "\n".join(char_summaries)[:max_chars_per_section])
 
     threads_file = vault_path / "Threads" / "threads.md"
     if threads_file.exists():
-        parts.append("### OPEN THREADS\n" + threads_file.read_text(encoding="utf-8")[-max_chars_per_section:])
+        parts.append("### OPEN THREADS\n" + threads_file.read_text(encoding="utf-8")[:max_chars_per_section])
 
     timeline_file = vault_path / "Timeline" / "timeline.md"
     if timeline_file.exists():
-        parts.append("### RECENT TIMELINE (tail)\n" + timeline_file.read_text(encoding="utf-8")[-max_chars_per_section:])
+        parts.append("### TIMELINE (chronological events)\n" + timeline_file.read_text(encoding="utf-8")[:max_chars_per_section])
 
     return "\n\n".join(parts)
 
@@ -286,7 +294,7 @@ def extract_json(raw: str, finish_reason: str = None, model: str = "") -> dict:
     raise ValueError(f"Failed to parse model output as JSON. Output was:\n{raw[:400]}")
 
 
-def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict:
+def call_llm(base_url: str, model: str, context: str, chapter_text: str, max_tokens: int = 16384) -> dict:
     user_content = f"CONTEXT:\n{context}\n\n---\n\nNEW CHAPTER DRAFT:\n{chapter_text}"
     payload = {
         "model": model,
@@ -295,12 +303,12 @@ def call_llm(base_url: str, model: str, context: str, chapter_text: str) -> dict
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.2,
-        "max_tokens": 8192,
+        "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }
 
     try:
-        resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=300)
+        resp = requests.post(f"{base_url}/chat/completions", json=payload, timeout=600)
         # If model does not support response_format, retry without it
         if resp.status_code == 400 and "response_format" in resp.text:
             payload.pop("response_format", None)
@@ -629,9 +637,10 @@ def process_chapter(args):
     chapter_text = chapter_path.read_text(encoding="utf-8")
 
     context = gather_context(vault_path)
-    print("Calling local model for analysis & editorial review...")
+    max_tokens = getattr(args, "max_tokens", 16384) or 16384
+    print(f"Calling local model for analysis & editorial review (max_tokens: {max_tokens})...")
     try:
-        data = call_llm(args.base_url, args.model, context, chapter_text)
+        data = call_llm(args.base_url, args.model, context, chapter_text, max_tokens=max_tokens)
     except Exception as e:
         raise SystemExit(f"\nError: {e}")
 
@@ -712,6 +721,7 @@ def main():
     p_proc.add_argument("--status", default=None, help="draft|revised|final (default: draft)")
     p_proc.add_argument("--model", required=True, help="Model name as loaded in LM Studio.")
     p_proc.add_argument("--base-url", dest="base_url", default=DEFAULT_BASE_URL, help=f"LM Studio API base URL (default: {DEFAULT_BASE_URL})")
+    p_proc.add_argument("--max-tokens", type=int, default=16384, help="Maximum completion tokens (default: 16384 for 40k+ models).")
     p_proc.add_argument("-y", "--yes", action="store_true", help="Automatically approve and apply changes without prompt.")
 
     p_app = sub.add_parser("app", help="Launch the Visual Web Dashboard / Window.")

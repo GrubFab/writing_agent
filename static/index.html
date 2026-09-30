@@ -156,13 +156,22 @@
 
         <!-- Model Row -->
         <div class="model-row">
-          <div class="form-group">
+          <div class="form-group" style="flex: 2;">
             <label for="select-model">LM Studio Model</label>
             <select id="select-model">
               <option value="" disabled selected>Scanning LM Studio models...</option>
             </select>
           </div>
-          <button class="btn-secondary" id="btn-refresh-models" title="Scan LM Studio for loaded models">🔄 Refresh Models</button>
+          <div class="form-group" style="flex: 1; min-width: 150px;">
+            <label for="select-max-tokens" title="Tokens allocated for model response & internal reasoning">Output Token Budget</label>
+            <select id="select-max-tokens">
+              <option value="8192">8,192 tokens</option>
+              <option value="16384" selected>16,384 tokens (40k+)</option>
+              <option value="24576">24,576 tokens</option>
+              <option value="32768">32,768 tokens</option>
+            </select>
+          </div>
+          <button class="btn-secondary" id="btn-refresh-models" title="Scan LM Studio for loaded models" style="align-self: flex-end; margin-bottom: 2px;">🔄 Refresh</button>
         </div>
 
         <!-- Draft Input Mode Toggle -->

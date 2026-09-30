@@ -67,6 +67,7 @@ class ProcessRequest(BaseModel):
     base_url: str = DEFAULT_BASE_URL
     draft_text: Optional[str] = None
     draft_file: Optional[str] = None
+    max_tokens: int = 16384
 
 
 class ApplyRequest(BaseModel):
@@ -516,7 +517,7 @@ async def process_chapter_stream(req: ProcessRequest):
         yield json.dumps({
             "step": "llm_start",
             "progress": 55,
-            "message": f"Sending context and draft to LM Studio model '{req.model}'...",
+            "message": f"Sending context and draft to LM Studio model '{req.model}' (max_tokens: {req.max_tokens})...",
         })
         await asyncio.sleep(0.1)
 
@@ -529,6 +530,7 @@ async def process_chapter_stream(req: ProcessRequest):
                 req.model,
                 context,
                 chapter_text,
+                req.max_tokens or 16384,
             )
         except Exception as e:
             yield json.dumps({"step": "error", "error": f"Model inference failed: {str(e)}"})

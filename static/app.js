@@ -479,6 +479,9 @@ async function handleProcessChapter() {
     return;
   }
 
+  const maxTokensEl = document.getElementById("select-max-tokens");
+  const maxTokens = maxTokensEl ? (parseInt(maxTokensEl.value) || 16384) : 16384;
+
   // Setup UI for processing
   isProcessing = true;
   const btnProcess = document.getElementById("btn-process");
@@ -494,7 +497,7 @@ async function handleProcessChapter() {
   pipelineSection.style.display = "flex";
   resultsSection.style.display = "none";
   progressFill.style.width = "5%";
-  consoleStream.textContent = "Starting story agent analysis pipeline...\n";
+  consoleStream.textContent = `Starting story agent analysis pipeline (max tokens: ${maxTokens.toLocaleString()})...\n`;
 
   // Reset steps
   resetSteps();
@@ -509,6 +512,7 @@ async function handleProcessChapter() {
       base_url: currentBaseUrl,
       draft_text: isEditorMode ? draftText : null,
       draft_file: !isEditorMode ? draftFile : null,
+      max_tokens: maxTokens,
     };
 
     const response = await fetch("/api/process", {
