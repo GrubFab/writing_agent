@@ -47,14 +47,15 @@ function insertPropositionIntoWorkbench(prop, originalExcerpt) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Load initial projects, authors & config
-  await loadProjects();
-  await loadAuthors();
-  checkLmStudioModels();
-  loadVaultData();
-  checkChapterExists();
-
+  // 1. Setup event listeners immediately so Quit button, tabs, and modals are responsive
   setupEventListeners();
+
+  // 2. Load initial projects, authors, models and vault data with error isolation
+  try { await loadProjects(); } catch (e) { console.warn("Could not load projects:", e); }
+  try { await loadAuthors(); } catch (e) { console.warn("Could not load authors:", e); }
+  try { checkLmStudioModels(); } catch (e) { console.warn("Could not check LM Studio:", e); }
+  try { loadVaultData(); } catch (e) { console.warn("Could not load vault data:", e); }
+  try { checkChapterExists(); } catch (e) { console.warn("Could not check chapter:", e); }
 });
 
 // ---------------------------------------------------------------------------
@@ -1101,6 +1102,8 @@ async function handleApplyToVault() {
       });
       stagedAnalysis.data.continuity_clarifications = clarifs;
     }
+  }
+
   // Collect latest draft text and iteration from workbench
   const wbText = document.getElementById("workbench-draft-text");
   if (wbText && wbText.value.trim() && stagedAnalysis) {
