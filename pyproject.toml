@@ -21,7 +21,7 @@ writing-agent = "writing_agent:main"
 writing_agent = "writing_agent:main"
 
 [tool.setuptools]
-py-modules = ["writing_agent", "app"]
+py-modules = ["writing_agent", "app", "author_styles"]
 
 [tool.setuptools.package-data]
 "*" = ["static/*"]
