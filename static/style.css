@@ -860,3 +860,230 @@ textarea.draft-editor {
   transform: none;
 }
 
+/* ---------------------------------------------------------------------------
+   Author Style DNA Mixer
+   --------------------------------------------------------------------------- */
+.style-dna-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  margin-top: 0.75rem;
+}
+
+.style-dna-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.style-dna-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.style-count-badge {
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 12px;
+  font-family: var(--font-mono);
+}
+
+.style-dna-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-sm-text {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-sm-text:hover {
+  color: var(--text-main);
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.author-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+  min-height: 28px;
+}
+
+.author-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-surface);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--text-main);
+  transition: all 0.15s ease;
+}
+
+.author-chip:hover {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.06);
+}
+
+.author-chip-name {
+  font-weight: 600;
+}
+
+.author-chip-genre {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+.author-chip-del {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 0.1rem;
+}
+
+.author-chip-del:hover {
+  color: var(--rose);
+}
+
+.author-picker-row {
+  display: flex;
+  align-items: center;
+}
+
+.select-add-author {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+
+.select-add-author:hover {
+  border-color: var(--accent);
+  color: var(--text-main);
+}
+
+/* ---------------------------------------------------------------------------
+   Interactive Continuity Flags & Author Clarifications
+   --------------------------------------------------------------------------- */
+.continuity-alert {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.continuity-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.continuity-header-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.continuity-cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.continuity-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.continuity-flag-desc {
+  font-size: 0.85rem;
+  color: #fbbf24;
+  line-height: 1.45;
+}
+
+.continuity-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.continuity-text-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-main);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.continuity-text-input:focus {
+  border-color: var(--amber);
+}
+
+.continuity-status-select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: 4px;
+  padding: 0.38rem 0.5rem;
+  font-size: 0.78rem;
+  outline: none;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.continuity-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.continuity-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+

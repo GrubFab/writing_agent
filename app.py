@@ -27,6 +27,11 @@ from sse_starlette.sse import EventSourceResponse
 
 import writing_agent as wa
 
+try:
+    from . import author_styles
+except ImportError:
+    import author_styles
+
 app = FastAPI(title="Writing Agent Dashboard", version="1.0.0")
 
 app.add_middleware(
@@ -68,6 +73,22 @@ class ProcessRequest(BaseModel):
     draft_text: Optional[str] = None
     draft_file: Optional[str] = None
     max_tokens: int = 16384
+    language: str = "en"
+    authors: Optional[list[str]] = None
+    author_clarifications: Optional[list[dict]] = None
+
+
+class CustomAuthorRequest(BaseModel):
+    name: str
+    description: str
+    genre: Optional[str] = "Custom / Hybrid"
+    tagline: Optional[str] = ""
+
+
+class ProjectPreferencesRequest(BaseModel):
+    project_id: str
+    language: Optional[str] = "en"
+    authors: Optional[list[str]] = None
 
 
 class ApplyRequest(BaseModel):
@@ -87,6 +108,8 @@ class NewProjectRequest(BaseModel):
     vault_path: Optional[str] = None
     premise: Optional[str] = None
     init_git: bool = True
+    language: Optional[str] = "en"
+    authors: Optional[list[str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +131,8 @@ def get_projects_data() -> dict:
                     "id": "cold",
                     "name": "Cold",
                     "path": str(Path(DEFAULT_VAULT).resolve()),
+                    "language": "en",
+                    "authors": list(author_styles.DEFAULT_STYLE_IDS),
                     "created_at": datetime.now().isoformat(),
                     "last_opened": datetime.now().isoformat(),
                 }
@@ -123,10 +148,18 @@ def get_projects_data() -> dict:
                 "id": "cold",
                 "name": "Cold",
                 "path": str(Path(DEFAULT_VAULT).resolve()),
+                "language": "en",
+                "authors": list(author_styles.DEFAULT_STYLE_IDS),
                 "created_at": datetime.now().isoformat(),
                 "last_opened": datetime.now().isoformat(),
             }]
             data["active_id"] = "cold"
+        else:
+            for p in data["projects"]:
+                if "language" not in p:
+                    p["language"] = "en"
+                if "authors" not in p or not isinstance(p["authors"], list):
+                    p["authors"] = list(author_styles.DEFAULT_STYLE_IDS)
         return data
     except Exception:
         return {
@@ -136,6 +169,8 @@ def get_projects_data() -> dict:
                     "id": "cold",
                     "name": "Cold",
                     "path": str(Path(DEFAULT_VAULT).resolve()),
+                    "language": "en",
+                    "authors": list(author_styles.DEFAULT_STYLE_IDS),
                     "created_at": datetime.now().isoformat(),
                     "last_opened": datetime.now().isoformat(),
                 }
@@ -258,6 +293,8 @@ def create_new_project(req: NewProjectRequest):
         "id": unique_id,
         "name": clean_name,
         "path": str(vault_dir),
+        "language": req.language or "en",
+        "authors": req.authors[:6] if req.authors else list(author_styles.DEFAULT_STYLE_IDS),
         "created_at": datetime.now().isoformat(),
         "last_opened": datetime.now().isoformat(),
     }
@@ -288,6 +325,67 @@ def remove_project(project_id: str):
 
     save_projects_data(data)
     return {"status": "ok", "projects": data["projects"]}
+
+
+@app.get("/api/authors")
+def get_authors():
+    """Return all available authors (built-in + custom), defaults, and active preferences."""
+    all_authors = author_styles.get_all_authors()
+    active = get_active_project()
+    return {
+        "authors": list(all_authors.values()),
+        "default_author_ids": author_styles.DEFAULT_STYLE_IDS,
+        "active_author_ids": active.get("authors") or author_styles.DEFAULT_STYLE_IDS,
+        "active_language": active.get("language") or "en",
+    }
+
+
+@app.post("/api/authors/custom")
+def add_custom_author(req: CustomAuthorRequest):
+    """Add a user-defined custom author to the local database."""
+    clean_name = req.name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Author name is required")
+    if not req.description.strip():
+        raise HTTPException(status_code=400, detail="Author style description is required")
+
+    author_obj = author_styles.save_custom_author(
+        name=clean_name,
+        description=req.description.strip(),
+        genre=req.genre.strip() if req.genre else "Custom / Hybrid",
+        tagline=req.tagline.strip() if req.tagline else "",
+    )
+    return {"status": "ok", "author": author_obj, "authors": list(author_styles.get_all_authors().values())}
+
+
+@app.delete("/api/authors/custom/{author_id}")
+def remove_custom_author(author_id: str):
+    """Delete a user-defined custom author."""
+    success = author_styles.delete_custom_author(author_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Custom author not found")
+    return {"status": "ok", "authors": list(author_styles.get_all_authors().values())}
+
+
+@app.post("/api/projects/preferences")
+def update_project_preferences(req: ProjectPreferencesRequest):
+    """Save language and author style preferences for a project."""
+    data = get_projects_data()
+    target = None
+    for p in data.get("projects", []):
+        if p.get("id") == req.project_id:
+            target = p
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if req.language:
+        target["language"] = req.language
+    if req.authors is not None:
+        target["authors"] = req.authors[:6]
+
+    save_projects_data(data)
+    return {"status": "ok", "project": target}
 
 
 @app.get("/api/models")
@@ -514,10 +612,12 @@ async def process_chapter_stream(req: ProcessRequest):
         context = wa.gather_context(v_path)
 
         # 3. Model Invocation
+        style_info = f" (style: {len(req.authors or [])} authors, lang: {req.language})" if (req.authors or req.language != 'en') else ""
+        clarif_info = f" [incorporating {len(req.author_clarifications)} author clarification(s)]" if req.author_clarifications else ""
         yield json.dumps({
             "step": "llm_start",
             "progress": 55,
-            "message": f"Sending context and draft to LM Studio model '{req.model}' (max_tokens: {req.max_tokens})...",
+            "message": f"Sending context and draft to LM Studio model '{req.model}' (max tokens: {req.max_tokens}){style_info}{clarif_info}...",
         })
         await asyncio.sleep(0.1)
 
@@ -531,10 +631,17 @@ async def process_chapter_stream(req: ProcessRequest):
                 context,
                 chapter_text,
                 req.max_tokens or 16384,
+                req.language or "en",
+                req.authors,
+                req.author_clarifications,
             )
         except Exception as e:
             yield json.dumps({"step": "error", "error": f"Model inference failed: {str(e)}"})
             return
+
+        # Preserve author clarifications in staged data if provided
+        if req.author_clarifications:
+            data["continuity_clarifications"] = req.author_clarifications
 
         yield json.dumps({
             "step": "llm_done",

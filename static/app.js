@@ -5,15 +5,143 @@ let currentBaseUrl = "http://localhost:1234/v1";
 let isProcessing = false;
 let stagedAnalysis = null;
 
+// Author Style DNA & Language Preferences
+let allAuthors = [];
+let activeAuthorIds = ["connelly", "clancy", "crichton", "suarez", "robinson"];
+let activeLanguage = "en";
+
 document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Load initial projects & config
+  // 1. Load initial projects, authors & config
   await loadProjects();
+  await loadAuthors();
   checkLmStudioModels();
   loadVaultData();
   checkChapterExists();
 
   setupEventListeners();
 });
+
+// ---------------------------------------------------------------------------
+// Author Style DNA & Language Management
+// ---------------------------------------------------------------------------
+
+async function loadAuthors() {
+  try {
+    const res = await fetch("/api/authors");
+    if (res.ok) {
+      const data = await res.json();
+      allAuthors = data.authors || [];
+      if (currentProject && currentProject.authors) {
+        activeAuthorIds = currentProject.authors;
+      } else if (data.active_author_ids) {
+        activeAuthorIds = data.active_author_ids;
+      }
+      if (currentProject && currentProject.language) {
+        activeLanguage = currentProject.language;
+      } else if (data.active_language) {
+        activeLanguage = data.active_language;
+      }
+
+      const langSelect = document.getElementById("select-language");
+      if (langSelect) langSelect.value = activeLanguage;
+
+      renderAuthorChips();
+    }
+  } catch (e) {
+    console.warn("Could not load authors:", e);
+  }
+}
+
+function renderAuthorChips() {
+  const container = document.getElementById("author-chips-container");
+  const badge = document.getElementById("style-count-badge");
+  const selectAdd = document.getElementById("select-add-author");
+  if (!container) return;
+
+  container.innerHTML = "";
+  if (badge) {
+    badge.textContent = `${activeAuthorIds.length} / 6 selected`;
+  }
+
+  // Render chips
+  activeAuthorIds.forEach(aid => {
+    const author = allAuthors.find(a => a.id === aid) || { id: aid, name: aid.replace("_", " "), genre: "Style Reference" };
+    const chip = document.createElement("div");
+    chip.className = "author-chip";
+    chip.title = author.description || author.tagline || "";
+    chip.innerHTML = `
+      <span class="author-chip-name">${escapeHtml(author.name)}</span>
+      <span class="author-chip-genre">${escapeHtml(author.genre ? '(' + author.genre.split('/')[0].trim() + ')' : '')}</span>
+      <button class="author-chip-del" title="Remove ${escapeHtml(author.name)}">&times;</button>
+    `;
+    chip.querySelector(".author-chip-del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeAuthor(aid);
+    });
+    container.appendChild(chip);
+  });
+
+  // Populate dropdown with available authors not yet selected
+  if (selectAdd) {
+    selectAdd.innerHTML = '<option value="" disabled selected>+ Add author style reference to mix (max 6)...</option>';
+    if (activeAuthorIds.length >= 6) {
+      selectAdd.disabled = true;
+      selectAdd.title = "Maximum 6 authors selected in style DNA mix";
+    } else {
+      selectAdd.disabled = false;
+      selectAdd.title = "Select an author to add to your style DNA";
+      allAuthors.filter(a => !activeAuthorIds.includes(a.id)).forEach(a => {
+        const opt = document.createElement("option");
+        opt.value = a.id;
+        opt.textContent = `${a.name} — ${a.tagline || a.genre}`;
+        selectAdd.appendChild(opt);
+      });
+    }
+  }
+}
+
+async function addAuthor(authorId) {
+  if (activeAuthorIds.length >= 6) {
+    alert("You can select a maximum of 6 reference authors for the style blend.");
+    return;
+  }
+  if (!activeAuthorIds.includes(authorId)) {
+    activeAuthorIds.push(authorId);
+    renderAuthorChips();
+    await savePreferences();
+  }
+}
+
+async function removeAuthor(authorId) {
+  activeAuthorIds = activeAuthorIds.filter(id => id !== authorId);
+  renderAuthorChips();
+  await savePreferences();
+}
+
+async function resetCoreBlend() {
+  activeAuthorIds = ["connelly", "clancy", "crichton", "suarez", "robinson"];
+  renderAuthorChips();
+  await savePreferences();
+}
+
+async function savePreferences() {
+  if (!currentProject || !currentProject.id) return;
+  try {
+    await fetch("/api/projects/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: currentProject.id,
+        language: activeLanguage,
+        authors: activeAuthorIds,
+      }),
+    });
+    currentProject.language = activeLanguage;
+    currentProject.authors = activeAuthorIds;
+  } catch (e) {
+    console.warn("Could not save preferences:", e);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Projects Management
@@ -27,6 +155,8 @@ async function loadProjects() {
       if (data.active_project) {
         currentProject = data.active_project;
         currentVault = data.active_project.path;
+        if (data.active_project.language) activeLanguage = data.active_project.language;
+        if (data.active_project.authors) activeAuthorIds = data.active_project.authors;
       }
       renderProjectsDropdown(data.projects || [], data.active_id);
     }
@@ -67,6 +197,15 @@ async function switchProject(projectId) {
       const data = await res.json();
       currentProject = data.active_project;
       currentVault = data.active_project.path;
+      if (data.active_project.language) {
+        activeLanguage = data.active_project.language;
+        const langEl = document.getElementById("select-language");
+        if (langEl) langEl.value = activeLanguage;
+      }
+      if (data.active_project.authors) {
+        activeAuthorIds = data.active_project.authors;
+        renderAuthorChips();
+      }
       updateVaultDisplay();
       renderProjectsDropdown(data.projects, data.active_project.id);
       closeProjectDropdown();
@@ -419,6 +558,86 @@ function setupEventListeners() {
     wordCountBadge.textContent = `${words.toLocaleString()} words | ${chars.toLocaleString()} characters`;
   });
 
+  // Language Selector
+  const selectLang = document.getElementById("select-language");
+  if (selectLang) {
+    selectLang.addEventListener("change", (e) => {
+      activeLanguage = e.target.value;
+      savePreferences();
+    });
+  }
+
+  // Author Style DNA Mixer
+  const btnCoreBlend = document.getElementById("btn-core-blend");
+  if (btnCoreBlend) {
+    btnCoreBlend.addEventListener("click", resetCoreBlend);
+  }
+
+  const selectAddAuthor = document.getElementById("select-add-author");
+  if (selectAddAuthor) {
+    selectAddAuthor.addEventListener("change", (e) => {
+      if (e.target.value) {
+        addAuthor(e.target.value);
+        e.target.value = "";
+      }
+    });
+  }
+
+  // Custom Author Modal
+  const modalAuthor = document.getElementById("modal-custom-author");
+  const btnOpenAuthor = document.getElementById("btn-open-custom-author");
+  const btnCloseAuthor = document.getElementById("btn-close-author-modal");
+  const btnCancelAuthor = document.getElementById("btn-cancel-author-modal");
+  const btnSubmitAuthor = document.getElementById("btn-submit-custom-author");
+
+  if (btnOpenAuthor && modalAuthor) {
+    btnOpenAuthor.addEventListener("click", () => {
+      document.getElementById("custom-author-name").value = "";
+      document.getElementById("custom-author-genre").value = "";
+      document.getElementById("custom-author-desc").value = "";
+      modalAuthor.style.display = "flex";
+      document.getElementById("custom-author-name").focus();
+    });
+  }
+  const closeAuthorModal = () => { if (modalAuthor) modalAuthor.style.display = "none"; };
+  if (btnCloseAuthor) btnCloseAuthor.addEventListener("click", closeAuthorModal);
+  if (btnCancelAuthor) btnCancelAuthor.addEventListener("click", closeAuthorModal);
+
+  if (btnSubmitAuthor) {
+    btnSubmitAuthor.addEventListener("click", async () => {
+      const name = document.getElementById("custom-author-name").value.trim();
+      const genre = document.getElementById("custom-author-genre").value.trim();
+      const desc = document.getElementById("custom-author-desc").value.trim();
+      if (!name) { alert("Please enter the author's name."); return; }
+      if (!desc) { alert("Please describe their craft traits and stylistic DNA."); return; }
+
+      try {
+        const res = await fetch("/api/authors/custom", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, genre, description: desc }),
+        });
+        if (res.ok) {
+          const d = await res.json();
+          allAuthors = d.authors;
+          if (d.author && !activeAuthorIds.includes(d.author.id)) {
+            if (activeAuthorIds.length < 6) {
+              activeAuthorIds.push(d.author.id);
+            }
+          }
+          renderAuthorChips();
+          await savePreferences();
+          closeAuthorModal();
+        } else {
+          const err = await res.json();
+          alert("Error: " + (err.detail || "Could not save custom author"));
+        }
+      } catch (err) {
+        alert("Failed to save author: " + err.message);
+      }
+    });
+  }
+
   // Chapter number change listener
   const chInput = document.getElementById("input-chapter-num");
   if (chInput) {
@@ -438,14 +657,14 @@ function setupEventListeners() {
   }
 
   // Process Chapter Button
-  document.getElementById("btn-process").addEventListener("click", handleProcessChapter);
+  document.getElementById("btn-process").addEventListener("click", () => handleProcessChapter(null));
 }
 
 // ---------------------------------------------------------------------------
 // Chapter Processing Stream (Analysis & Staging)
 // ---------------------------------------------------------------------------
 
-async function handleProcessChapter() {
+async function handleProcessChapter(authorClarifications = null) {
   if (isProcessing) return;
 
   const chNum = parseInt(document.getElementById("input-chapter-num").value) || 1;
@@ -481,13 +700,15 @@ async function handleProcessChapter() {
 
   const maxTokensEl = document.getElementById("select-max-tokens");
   const maxTokens = maxTokensEl ? (parseInt(maxTokensEl.value) || 16384) : 16384;
+  const langEl = document.getElementById("select-language");
+  const language = langEl ? langEl.value : activeLanguage;
 
   // Setup UI for processing
   isProcessing = true;
   const btnProcess = document.getElementById("btn-process");
   const btnProcessText = document.getElementById("btn-process-text");
   btnProcess.disabled = true;
-  btnProcessText.textContent = "Analyzing Chapter Draft...";
+  btnProcessText.textContent = authorClarifications ? "Re-evaluating with Clarifications..." : "Analyzing Chapter Draft...";
 
   const pipelineSection = document.getElementById("pipeline-section");
   const progressFill = document.getElementById("progress-fill");
@@ -497,7 +718,9 @@ async function handleProcessChapter() {
   pipelineSection.style.display = "flex";
   resultsSection.style.display = "none";
   progressFill.style.width = "5%";
-  consoleStream.textContent = `Starting story agent analysis pipeline (max tokens: ${maxTokens.toLocaleString()})...\n`;
+
+  const clarifMsg = authorClarifications ? ` (incorporating ${authorClarifications.length} author clarification(s))` : "";
+  consoleStream.textContent = `Starting story agent analysis pipeline (lang: ${language}, max tokens: ${maxTokens.toLocaleString()})${clarifMsg}...\n`;
 
   // Reset steps
   resetSteps();
@@ -513,6 +736,9 @@ async function handleProcessChapter() {
       draft_text: isEditorMode ? draftText : null,
       draft_file: !isEditorMode ? draftFile : null,
       max_tokens: maxTokens,
+      language: language,
+      authors: activeAuthorIds,
+      author_clarifications: authorClarifications,
     };
 
     const response = await fetch("/api/process", {
@@ -668,6 +894,27 @@ async function handleApplyToVault() {
     return;
   }
 
+  // Collect any typed continuity clarifications before submitting
+  const contContainer = document.getElementById("continuity-cards-container");
+  if (contContainer && stagedAnalysis && stagedAnalysis.data) {
+    const cards = contContainer.querySelectorAll(".continuity-card");
+    if (cards.length > 0) {
+      const clarifs = [];
+      cards.forEach(c => {
+        const descEl = c.querySelector(".continuity-flag-desc");
+        const flagText = descEl ? (descEl.getAttribute("data-flag-text") || descEl.textContent.trim()) : "";
+        const input = c.querySelector(".continuity-text-input");
+        const select = c.querySelector(".continuity-status-select");
+        clarifs.push({
+          flag: flagText,
+          clarification: input ? input.value.trim() : "",
+          resolution: select ? select.value : "Clarified",
+        });
+      });
+      stagedAnalysis.data.continuity_clarifications = clarifs;
+    }
+  }
+
   const btnApply = document.getElementById("btn-apply-to-vault");
   const btnText = document.getElementById("btn-apply-text");
   if (btnApply) btnApply.disabled = true;
@@ -745,17 +992,91 @@ function renderResults(result, isCommitted = false) {
   document.getElementById("res-pov").textContent = result.pov || "Unclear";
   document.getElementById("res-git-badge").style.display = isCommitted ? "inline-flex" : "none";
 
-  // Continuity flags
+  // Interactive Continuity flags & Author clarifications
   const contAlert = document.getElementById("continuity-alert");
-  const contList = document.getElementById("continuity-list");
-  contList.innerHTML = "";
-  if (result.continuity_flags && result.continuity_flags.length > 0) {
-    contAlert.style.display = "block";
-    result.continuity_flags.forEach(flag => {
-      const li = document.createElement("li");
-      li.textContent = flag;
-      contList.appendChild(li);
+  const contContainer = document.getElementById("continuity-cards-container");
+  if (contContainer) contContainer.innerHTML = "";
+
+  const flags = result.continuity_flags || [];
+  if (flags.length > 0) {
+    contAlert.style.display = "flex";
+
+    // Prepare initial clarifications structure
+    if (stagedAnalysis && stagedAnalysis.data) {
+      if (!stagedAnalysis.data.continuity_clarifications) {
+        stagedAnalysis.data.continuity_clarifications = flags.map(f => ({
+          flag: typeof f === 'string' ? f : (f.flag || ''),
+          clarification: typeof f === 'object' ? (f.clarification || '') : '',
+          resolution: typeof f === 'object' ? (f.resolution || 'Clarified') : 'Clarified',
+        }));
+      }
+    }
+
+    flags.forEach((f, idx) => {
+      const flagText = typeof f === 'string' ? f : (f.flag || '');
+      const existing = (stagedAnalysis && stagedAnalysis.data && stagedAnalysis.data.continuity_clarifications && stagedAnalysis.data.continuity_clarifications[idx]) || {};
+      const existingClarif = existing.clarification || '';
+      const existingRes = existing.resolution || 'Clarified';
+
+      const card = document.createElement("div");
+      card.className = "continuity-card";
+      card.innerHTML = `
+        <div class="continuity-flag-desc" data-flag-text="${escapeQuotes(flagText)}">
+          <strong>Flag ${idx + 1}:</strong> ${escapeHtml(flagText)}
+        </div>
+        <div class="continuity-input-row">
+          <input type="text" class="continuity-text-input" placeholder="Type your answer / clarification for this flag (e.g. cover story, intentional misdirection, etc.)..." value="${escapeHtml(existingClarif)}">
+          <select class="continuity-status-select">
+            <option value="Clarified" ${existingRes === 'Clarified' ? 'selected' : ''}>Clarified / Canon</option>
+            <option value="Misdirection" ${existingRes === 'Misdirection' ? 'selected' : ''}>Intentional Misdirection</option>
+            <option value="To Fix" ${existingRes === 'To Fix' ? 'selected' : ''}>To Fix in Draft</option>
+            <option value="Dismiss" ${existingRes === 'Dismiss' ? 'selected' : ''}>False Alarm / Dismiss</option>
+          </select>
+        </div>
+      `;
+
+      const input = card.querySelector(".continuity-text-input");
+      const select = card.querySelector(".continuity-status-select");
+
+      const updateStaged = () => {
+        if (stagedAnalysis && stagedAnalysis.data) {
+          if (!stagedAnalysis.data.continuity_clarifications) {
+            stagedAnalysis.data.continuity_clarifications = [];
+          }
+          stagedAnalysis.data.continuity_clarifications[idx] = {
+            flag: flagText,
+            clarification: input.value.trim(),
+            resolution: select.value,
+          };
+        }
+      };
+
+      input.addEventListener("input", updateStaged);
+      select.addEventListener("change", updateStaged);
+
+      contContainer.appendChild(card);
     });
+
+    // Wire up Re-evaluate button
+    const btnReevaluate = document.getElementById("btn-reevaluate-clarifications");
+    if (btnReevaluate) {
+      btnReevaluate.onclick = () => {
+        const clarifications = [];
+        const cards = contContainer.querySelectorAll(".continuity-card");
+        cards.forEach((c, i) => {
+          const descEl = c.querySelector(".continuity-flag-desc");
+          const flagText = descEl ? (descEl.getAttribute("data-flag-text") || descEl.textContent.trim()) : "";
+          const input = c.querySelector(".continuity-text-input");
+          const select = c.querySelector(".continuity-status-select");
+          clarifications.push({
+            flag: flagText,
+            clarification: input ? input.value.trim() : "",
+            resolution: select ? select.value : "Clarified",
+          });
+        });
+        handleProcessChapter(clarifications);
+      };
+    }
   } else {
     contAlert.style.display = "none";
   }

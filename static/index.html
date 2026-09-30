@@ -135,21 +135,30 @@
 
         <!-- Meta Inputs Grid -->
         <div class="form-grid">
-          <div class="form-group">
+          <div class="form-group" style="max-width: 90px;">
             <label for="input-chapter-num">Chapter #</label>
             <input type="number" id="input-chapter-num" value="1" min="1">
             <span id="chapter-exists-indicator" class="chapter-status-indicator" style="display:none;"></span>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="flex: 2;">
             <label for="input-title">Title</label>
             <input type="text" id="input-title" placeholder="e.g. The Beginning of the End">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="max-width: 110px;">
             <label for="input-status">Status</label>
             <select id="input-status">
               <option value="draft">draft</option>
               <option value="revised">revised</option>
               <option value="final">final</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 1; min-width: 140px;">
+            <label for="select-language" title="Language for editorial remarks, dialogue coaching, and story summaries">Feedback Language</label>
+            <select id="select-language">
+              <option value="en" selected>English (EN)</option>
+              <option value="fr">Français (FR)</option>
+              <option value="pt">Português (PT)</option>
+              <option value="auto">Auto-detect from draft</option>
             </select>
           </div>
         </div>
@@ -172,6 +181,33 @@
             </select>
           </div>
           <button class="btn-secondary" id="btn-refresh-models" title="Scan LM Studio for loaded models" style="align-self: flex-end; margin-bottom: 2px;">🔄 Refresh</button>
+        </div>
+
+        <!-- Author Style DNA Mixer (Max 6) -->
+        <div class="style-dna-panel">
+          <div class="style-dna-header">
+            <div class="style-dna-title">
+              <span>🎨</span>
+              <span>Editorial Style DNA</span>
+              <span class="style-count-badge" id="style-count-badge">5 / 6 selected</span>
+            </div>
+            <div class="style-dna-actions">
+              <button class="btn-sm-text" id="btn-core-blend" title="Reset to user's core reference blend: Connelly, Clancy, Crichton, Suarez, Robinson">
+                🎯 Core Blend
+              </button>
+              <button class="btn-sm-text" id="btn-open-custom-author" title="Add your own custom author reference to the database">
+                + Custom Author
+              </button>
+            </div>
+          </div>
+          <div class="author-chips-container" id="author-chips-container">
+            <!-- Populated dynamically by app.js -->
+          </div>
+          <div class="author-picker-row">
+            <select id="select-add-author" class="select-add-author">
+              <option value="" disabled selected>+ Add author style reference to mix (max 6)...</option>
+            </select>
+          </div>
         </div>
 
         <!-- Draft Input Mode Toggle -->
@@ -259,10 +295,29 @@
           </div>
         </div>
 
-        <!-- Continuity Alert if flags exist -->
+        <!-- Continuity Alert if flags exist (Interactive Answering & Clarification) -->
         <div id="continuity-alert" class="continuity-alert" style="display:none;">
-          <strong>⚠️ Continuity Flags Detected:</strong>
-          <ul id="continuity-list"></ul>
+          <div class="continuity-header">
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+              <span style="font-size:1.1rem;">⚠️</span>
+              <strong style="color:var(--amber);">Continuity Flags Detected</strong>
+            </div>
+            <span class="continuity-header-sub">Answer or clarify each item below. You can save answers to the vault or re-evaluate with the model.</span>
+          </div>
+
+          <!-- Dynamic list of interactive flag clarification cards -->
+          <div id="continuity-cards-container" class="continuity-cards-container"></div>
+
+          <!-- Actions: Re-evaluate or attach to approval -->
+          <div class="continuity-actions-bar">
+            <button class="btn-secondary" id="btn-reevaluate-clarifications" title="Send your explanations back to LM Studio to update the analysis and clear false alarms">
+              <span>🔄</span>
+              <span>Re-evaluate Draft with My Clarifications</span>
+            </button>
+            <span class="continuity-hint">
+              💡 Your clarifications are also permanently recorded in the Chapter Note upon vault approval.
+            </span>
+          </div>
         </div>
 
         <!-- Result Tabs -->
@@ -341,6 +396,41 @@
         <button class="btn-secondary" id="btn-cancel-modal">Cancel</button>
         <button class="btn-primary" id="btn-submit-new-project" style="width:auto; margin:0; padding:0.5rem 1.25rem;">
           🚀 Create Project & Vault
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Custom Author Reference -->
+  <div class="modal-backdrop" id="modal-custom-author" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>🎨 Add Custom Author Reference</h3>
+        <button class="modal-close-btn" id="btn-close-author-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="custom-author-name">Author Name *</label>
+          <input type="text" id="custom-author-name" placeholder="e.g. Alistair MacLean or Greg Egan">
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="custom-author-genre">Genre / Subgenre (Optional)</label>
+          <input type="text" id="custom-author-genre" placeholder="e.g. Classic Cold War Espionage / Hard Sci-Fi">
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.9rem;">
+          <label for="custom-author-desc">Stylistic DNA & Craft Traits *</label>
+          <textarea id="custom-author-desc" style="height:80px;" placeholder="Describe their dialogue habits, observational economy, pacing, or tradecraft precision..."></textarea>
+          <span style="font-size:0.75rem; color:var(--text-faint); margin-top:0.25rem;">
+            This will instruct the agent how to shape editorial critiques and dialogue propositions.
+          </span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-cancel-author-modal">Cancel</button>
+        <button class="btn-primary" id="btn-submit-custom-author" style="width:auto; margin:0; padding:0.5rem 1.25rem;">
+          💾 Save to Style Database
         </button>
       </div>
     </div>

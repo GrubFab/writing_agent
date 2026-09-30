@@ -35,11 +35,16 @@ from pathlib import Path
 
 import requests
 
+try:
+    from . import author_styles
+except ImportError:
+    import author_styles
+
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
 AUTO_MARK_START = "<!-- AGENT:AUTO-UPDATES:START -->"
 AUTO_MARK_END = "<!-- AGENT:AUTO-UPDATES:END -->"
 
-SYSTEM_PROMPT = """You are a meticulous story-bible assistant and perceptive literary editor for a novelist.
+SYSTEM_PROMPT_CORE = """You are a meticulous story-bible assistant and perceptive literary editor for a novelist.
 You will be given: (1) compact context about the story bible, existing characters, open plot
 threads, and timeline, and (2) the full text of a new chapter draft.
 
@@ -88,10 +93,28 @@ Respond with ONLY a single JSON object, no markdown fences, no commentary, match
 
 Only include characters/threads that are actually relevant to THIS chapter.
 Do not invent facts not present in the chapter text or the provided context.
-If nothing applies to a list, return an empty list.
+If nothing applies to a list, return an empty list."""
 
+
+def get_system_prompt(language: str = "en", author_ids: list = None) -> str:
+    """Build dynamic system prompt tailored to author style DNA and target feedback language."""
+    style_section = author_styles.build_style_prompt(author_ids)
+    lang_section = author_styles.build_language_instruction(language)
+
+    parts = [SYSTEM_PROMPT_CORE]
+    if style_section:
+        parts.append(f"\n{style_section}")
+    if lang_section:
+        parts.append(f"\n{lang_section}")
+
+    parts.append("""
 REASONING & CONTEXT INSTRUCTION:
-You have a generous context window (+40k tokens). Keep your internal reasoning / chain-of-thought focused on analyzing the story draft, character arcs, and authentic spoken dialogue. Ensure you output the complete, unabbreviated JSON object covering all requested fields without cutting off."""
+You have a generous context window (+40k tokens). Keep your internal reasoning / chain-of-thought focused on analyzing the story draft, character arcs, and authentic spoken dialogue. Ensure you output the complete, unabbreviated JSON object covering all requested fields without cutting off.""")
+
+    return "\n".join(parts)
+
+
+SYSTEM_PROMPT = get_system_prompt()
 
 
 # ---------------------------------------------------------------------------
@@ -294,12 +317,47 @@ def extract_json(raw: str, finish_reason: str = None, model: str = "") -> dict:
     raise ValueError(f"Failed to parse model output as JSON. Output was:\n{raw[:400]}")
 
 
-def call_llm(base_url: str, model: str, context: str, chapter_text: str, max_tokens: int = 16384) -> dict:
-    user_content = f"CONTEXT:\n{context}\n\n---\n\nNEW CHAPTER DRAFT:\n{chapter_text}"
+def call_llm(
+    base_url: str,
+    model: str,
+    context: str,
+    chapter_text: str,
+    max_tokens: int = 16384,
+    language: str = "en",
+    author_ids: list = None,
+    author_clarifications: list = None,
+) -> dict:
+    sys_prompt = get_system_prompt(language=language, author_ids=author_ids)
+
+    user_content_parts = [f"CONTEXT:\n{context}"]
+    if author_clarifications:
+        clarif_lines = [
+            "AUTHOR CONTINUITY CLARIFICATIONS & CANONICAL DECISIONS:",
+            "The author has reviewed previous continuity flags and provided the following clarifications/canonical facts:"
+        ]
+        for item in author_clarifications:
+            if isinstance(item, dict):
+                flag = item.get("flag", "")
+                ans = item.get("clarification", "").strip()
+                res = item.get("resolution", "Clarified")
+                if ans:
+                    clarif_lines.append(f"- Flag: {flag}\n  Author Clarification ({res}): {ans}")
+                else:
+                    clarif_lines.append(f"- Flag: {flag} (Author status: {res})")
+            elif isinstance(item, str):
+                clarif_lines.append(f"- {item}")
+        clarif_lines.append(
+            "Incorporate these author decisions as established canon. Update character dossiers, timeline, and threads accordingly, and do NOT flag them as contradictions again."
+        )
+        user_content_parts.append("\n".join(clarif_lines))
+
+    user_content_parts.append(f"---\n\nNEW CHAPTER DRAFT:\n{chapter_text}")
+    user_content = "\n\n".join(user_content_parts)
+
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": sys_prompt},
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.2,
@@ -351,7 +409,16 @@ def slugify(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", name.strip()).strip("_")
 
 
-def write_chapter_note(vault_path: Path, chapter_num, title, pov, status, summary, editorial_suggestions=None):
+def write_chapter_note(
+    vault_path: Path,
+    chapter_num,
+    title,
+    pov,
+    status,
+    summary,
+    editorial_suggestions=None,
+    continuity_clarifications=None,
+):
     path = vault_path / "Chapters" / f"Chapter_{int(chapter_num):02d}.md"
     parts = [
         f"""---
@@ -399,6 +466,21 @@ date_updated: {datetime.now().date().isoformat()}
             ed_parts.append("")
 
         parts.append("\n".join(ed_parts))
+
+    if continuity_clarifications:
+        cont_parts = ["\n## Continuity Notes & Author Clarifications\n"]
+        for item in continuity_clarifications:
+            if isinstance(item, dict):
+                flag = item.get("flag", "")
+                ans = item.get("clarification", "").strip()
+                res = item.get("resolution", "Clarified")
+                if ans:
+                    cont_parts.append(f"- ⚠️ **Flag**: {flag}\n  - **Resolution ({res})**: {ans}\n")
+                else:
+                    cont_parts.append(f"- ⚠️ **Flag**: {flag} *(Status: {res})*\n")
+            elif isinstance(item, str):
+                cont_parts.append(f"- ⚠️ {item}\n")
+        parts.append("".join(cont_parts))
 
     content = "".join(parts)
     path.write_text(content, encoding="utf-8")
@@ -537,10 +619,26 @@ def append_log(vault_path: Path, chapter_num, title, data):
     lines.append(f"- Characters touched: {', '.join(c['name'] for c in data.get('characters', []))}")
     lines.append(f"- Timeline events added: {len(data.get('timeline_events', []))}")
     lines.append(f"- Threads updated: {', '.join(t['name'] for t in data.get('threads', []))}")
-    flags = data.get("continuity_flags", [])
-    if flags:
-        lines.append("- ⚠️ Continuity flags:")
-        lines.extend(f"  - {f}" for f in flags)
+
+    clarifs = data.get("continuity_clarifications")
+    if clarifs:
+        lines.append("- ⚠️ Continuity flags & author resolutions:")
+        for item in clarifs:
+            if isinstance(item, dict):
+                flag = item.get("flag", "")
+                ans = item.get("clarification", "").strip()
+                res = item.get("resolution", "Clarified")
+                if ans:
+                    lines.append(f"  - Flag: {flag} -> Resolution ({res}): {ans}")
+                else:
+                    lines.append(f"  - Flag: {flag} (Status: {res})")
+            else:
+                lines.append(f"  - {item}")
+    else:
+        flags = data.get("continuity_flags", [])
+        if flags:
+            lines.append("- ⚠️ Continuity flags:")
+            lines.extend(f"  - {f}" for f in flags)
     lines.append("")
 
     with log_path.open("a", encoding="utf-8") as f:
@@ -569,6 +667,7 @@ def apply_chapter_data(vault_path: Path, chapter_num: int, title: str, status: s
     already_exists = chapter_exists(v_path, chapter_num)
 
     # 1. Write / Overwrite chapter note
+    continuity_items = data.get("continuity_clarifications") or data.get("continuity_flags")
     ch_path = write_chapter_note(
         v_path,
         chapter_num,
@@ -577,6 +676,7 @@ def apply_chapter_data(vault_path: Path, chapter_num: int, title: str, status: s
         status or "draft",
         data.get("summary", ""),
         data.get("editorial_suggestions"),
+        continuity_clarifications=continuity_items,
     )
 
     # 2. Update characters in-place
@@ -638,9 +738,20 @@ def process_chapter(args):
 
     context = gather_context(vault_path)
     max_tokens = getattr(args, "max_tokens", 16384) or 16384
-    print(f"Calling local model for analysis & editorial review (max_tokens: {max_tokens})...")
+    language = getattr(args, "language", "en") or "en"
+    author_ids = [a.strip() for a in args.authors.split(",")] if getattr(args, "authors", None) else None
+
+    print(f"Calling local model for analysis & editorial review (lang: {language}, max_tokens: {max_tokens})...")
     try:
-        data = call_llm(args.base_url, args.model, context, chapter_text, max_tokens=max_tokens)
+        data = call_llm(
+            args.base_url,
+            args.model,
+            context,
+            chapter_text,
+            max_tokens=max_tokens,
+            language=language,
+            author_ids=author_ids,
+        )
     except Exception as e:
         raise SystemExit(f"\nError: {e}")
 
@@ -722,6 +833,8 @@ def main():
     p_proc.add_argument("--model", required=True, help="Model name as loaded in LM Studio.")
     p_proc.add_argument("--base-url", dest="base_url", default=DEFAULT_BASE_URL, help=f"LM Studio API base URL (default: {DEFAULT_BASE_URL})")
     p_proc.add_argument("--max-tokens", type=int, default=16384, help="Maximum completion tokens (default: 16384 for 40k+ models).")
+    p_proc.add_argument("--language", default="en", choices=["en", "fr", "pt", "auto"], help="Editorial and feedback language: en, fr, pt, auto (default: en).")
+    p_proc.add_argument("--authors", default=None, help="Comma-separated author style IDs/names (max 6, e.g. 'connelly,clancy,crichton').")
     p_proc.add_argument("-y", "--yes", action="store_true", help="Automatically approve and apply changes without prompt.")
 
     p_app = sub.add_parser("app", help="Launch the Visual Web Dashboard / Window.")
